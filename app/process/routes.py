@@ -1,13 +1,14 @@
-from fastapi import FastAPI,status,HTTPException,Depends,Request
+from fastapi import FastAPI,status,HTTPException,Depends,Request,Response
 from fastapi.responses import JSONResponse
 from scalar_fastapi import get_scalar_api_reference
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer,HTTPAuthorizationCredentials
 from jose import JWTError,jwt
 from datetime import datetime,timedelta
-from models.schemas import Users,UserAuthentication,UpdateUser,RecoveryPassword,ResetPassword
+from models.schemas import Users,UserAuthentication,UpdateUser,RecoveryPassword,ResetPassword,Account
 from control.configuration import Config
 from process.user_process import UserProcess
+from process.account_process import AccountProcess
 from starlette.middleware.base import BaseHTTPMiddleware
 import secrets
 
@@ -15,6 +16,7 @@ import secrets
 
 app = FastAPI()
 user_process = UserProcess()
+account_process = AccountProcess()
 
 
 origins = [
@@ -34,6 +36,18 @@ security = HTTPBearer()
 
 class TenantMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+
+        excluded_paths = [
+            "/auth/account/user",
+            "/auth/verify/account",
+            "/account",
+            "/accounts",
+            "/scalar",
+            "/docs",
+            "/openapi.json"
+        ]
+        if request.url.path in excluded_paths:
+            return await call_next(request)
         
         host = request.headers.get("host") 
         slug = host.split(".")[0]     
@@ -85,6 +99,31 @@ async def authenticate_user(body: UserAuthentication,request:Request):
     
     token = create_token({"sub": user["username"],"user_id":user_validation["id"],"role":user_validation["role"]})
     return {"token": token}
+
+
+@app.get("/auth/verify/account", status_code=status.HTTP_200_OK)
+def verify_token_account(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        return {"valid": True, "user": payload.get("sub")}
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"message": "Invalid token or expired"}
+        )
+
+
+@app.post("/auth/account/user",status_code=status.HTTP_200_OK)
+async def authenticate_user_account_request(body: UserAuthentication):
+    user = body.model_dump()
+    user_validation = await account_process.authenticate_user_account(user)
+    if not user_validation :
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail={"message":"unauthorized access"})
+    
+    token = create_token({"sub": user["username"],"user_id":user_validation["id"]})
+    return {"token": token}
+
 
 
 
@@ -183,8 +222,100 @@ async def delete_user(username:str,request:Request,credentials: HTTPAuthorizatio
 
     return {"message":f"User {username} deleted successfully"}
 
+@app.post("/account", status_code=status.HTTP_201_CREATED)
+async def create_account(body: Account, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        user_id = payload.get("user_id")
+        username = payload.get("sub")
+        
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"message": "Invalid token or expired"}
+        )
+
+    body_information = body.model_dump()
+    validate_user = await account_process.validate_user_permission(user_id,username)
+    if not validate_user:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"message": "Not enough permissions"}
+        )
+    
+    create_account_response = await account_process.register_account(body_information)
+
+    if create_account_response =="DUPLICATE":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail={"message":"Account already created"})
+
+    return {"message":"Account created successfully"}
 
 
+@app.delete("/account/{slug_account}", status_code=status.HTTP_200_OK)
+async def delete_account(slug_account, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        user_id = payload.get("user_id")
+        username = payload.get("sub")
+        
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"message": "Invalid token or expired"}
+        )
+
+    validate_user = await account_process.validate_user_permission(user_id,username)
+    if not validate_user:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"message": "Not enough permissions"}
+        )
+    
+    print("slug to delete: ",slug_account)
+    delete_account_result = await account_process.delete_account_from_table(slug_account)  
+    if not delete_account_result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message":f"Account {slug_account} not found"})
+
+    return {"message":f"Account {slug_account} deleted successfully"}
+
+
+
+@app.get("/accounts",status_code=status.HTTP_200_OK)
+async def get_accounts(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        user_id = payload.get("user_id")
+        username = payload.get("sub")
+        
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"message": "Invalid token or expired"}
+        )
+
+    validate_user = await account_process.validate_user_permission(user_id,username)
+    if not validate_user:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"message": "Not enough permissions"}
+        )
+    accounts_response = await account_process.get_accounts_list()
+    
+    if not accounts_response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"message":f"Server error"})
+    
+    if accounts_response == "NO_CONTENT":
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    
+    return {"data": accounts_response}
+
+
+    
+
+    
 @app.get("/scalar",include_in_schema=False)
 def get_scalar_docs():
     return get_scalar_api_reference(openapi_url=app.openapi_url,title="Documentation")

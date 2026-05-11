@@ -36,6 +36,7 @@ class UserProcess:
             print("Error validating user: ",err)
             return  False
         return authentication_result
+
     
     async def get_account_from_slug(self,slug):
         try:

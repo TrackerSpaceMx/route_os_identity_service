@@ -75,8 +75,7 @@ class MysqlOperations:
         except Exception as err:
             print("Error selecting the user: ",err)
             return ()
-        
-    
+            
 
     async def update_user(self, account: str, body: dict, user_to_update: str) -> bool:
         try:
@@ -194,3 +193,83 @@ class MysqlOperations:
             print("Error inserting user in table: ",err)
             traceback.print_exc()
             return False
+    
+    async def select_user_account(self, user:str) -> tuple:
+        try:
+            pool = await self._get_pool()  
+            async with pool.acquire() as connection:
+                async with connection.cursor() as cursor:
+                    query = "SELECT username,password_hash,id FROM route_os_users_auth WHERE username= %s" 
+                    await cursor.execute(query,(user,))
+                    results = await cursor.fetchall()
+                    if results and len(results)> 0:
+                        return results
+        except Exception as err:
+            print("Error selecting the user: ",err)
+            return ()
+    
+    async def select_user_account_with_id(self, user:str,user_id:str) -> tuple:
+        try:
+            pool = await self._get_pool()  
+            async with pool.acquire() as connection:
+                async with connection.cursor() as cursor:
+                    query = "SELECT username,password_hash,id FROM route_os_users_auth WHERE username= %s and id = %s" 
+                    await cursor.execute(query,(user,user_id))
+                    results = await cursor.fetchall()
+                    if results and len(results)> 0:
+                        return results
+        except Exception as err:
+            print("Error selecting the user: ",err)
+            return ()
+    
+    async def insert_account(self,account:dict):
+        try:
+            pool = await self._get_pool()  
+            async with pool.acquire() as connection:
+                async with connection.cursor() as cursor:
+                    query = """INSERT INTO 
+                                accounts(slug,name,api_key_hash,secret_key_hash,rfc,address,company_name)
+                                VALUES(%s,%s,%s,%s,%s,%s,%s)"""
+
+                    await cursor.execute(query,(account["slug"],account["name"],account["api_key"],account["secret_key"],account["rfc"],account["address"],account["company_name"]))
+                    await connection.commit()
+                    if cursor.rowcount>0:
+                        return True
+                    else:
+                        return False
+        except IntegrityError as err:
+            if err.args[0] == 1062:
+                return "DUPLICATE"
+            return False
+        except Exception as err:
+            print("Error inserting account in table: ",err)
+            return False
+    
+
+    async def delete_account(self, slug_account:str) -> bool:
+        try:
+            pool = await self._get_pool()
+            async with pool.acquire() as connection:
+                async with connection.cursor() as cursor:
+                    query = "DELETE FROM accounts WHERE slug = %s"
+                    await cursor.execute(query, (slug_account,))
+                    await connection.commit()
+                    return cursor.rowcount > 0
+        except Exception as err:
+            print("Error deleting user:", err)
+            return False
+    
+
+    async def select_all_accounts(self) -> tuple:
+        try:
+            pool = await self._get_pool()  
+            async with pool.acquire() as connection:
+                async with connection.cursor() as cursor:
+                    query = "SELECT display_id,slug,name,company_name,rfc,created_at FROM accounts" 
+                    await cursor.execute(query)
+                    results = await cursor.fetchall()
+                    if results and len(results)> 0:
+                        return results
+        except Exception as err:
+            print("Error selecting the accounts: ",err)
+            return ()

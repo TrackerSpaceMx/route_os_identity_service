@@ -39,6 +39,24 @@ class OperationsDB:
                     result_dictionary = {"user":username_db,"id":user_id,"role": role}
                     result = result_dictionary
         return result
+    
+
+    async def validate_user_from_table_account(self,user_information):
+        result= False
+        username = user_information.get("username",None)
+        password_input = user_information.get("password",None)
+        if username:
+            user_information_db = await self.__mysqlOperations.select_user_account(username)
+            if user_information and len(user_information_db)>0:
+                
+                username_db= user_information_db[0][0]
+                password_hash =  user_information_db[0][1]
+                password_validation = self.validate_password(password_input,password_hash)
+                user_id = user_information_db[0][2]
+                if password_validation:
+                    result_dictionary = {"user":username_db,"id":user_id}
+                    result = result_dictionary
+        return result
         
     
     async def update_user(self,account: str, body:dict,user_to_update:str):
@@ -78,3 +96,31 @@ class OperationsDB:
             if token_status:
                 return True
         return False
+
+
+    async def select_account_user_by_id_and_username(self, user_id,username):
+        user_response = await self.__mysqlOperations.select_user_account_with_id(username,user_id)
+        return user_response
+    
+    async def register_account_in_table(self,account):
+        account_result = await self.__mysqlOperations.insert_account(account)
+        return account_result
+
+
+    async def delete_account_from_table_with_users(self,slug_account):
+        delete_response = await self.__mysqlOperations.delete_account(slug_account)
+        return delete_response
+    
+
+    async def get_accounts_from_table(self):
+        accounts_response = await self.__mysqlOperations.select_all_accounts()
+        if accounts_response is None:
+            return "NO_CONTENT"
+        if accounts_response:
+            accounts = []
+            for account in accounts_response:
+                account_dictionary = {"id":account[0],"slug":account[1],"name":account[2],"company":account[3],"rfc":account[4],"created_at":account[5]}
+                accounts.append(account_dictionary)
+            return accounts
+        else:
+            return False

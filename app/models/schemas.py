@@ -31,3 +31,13 @@ class RecoveryPassword(BaseModel):
 class ResetPassword(BaseModel):
     token: str
     new_password: str
+
+
+class Account(BaseModel):
+    slug:str
+    name: str
+    api_key:str
+    secret_key: str
+    rfc: str
+    address: str
+    company_name:str
