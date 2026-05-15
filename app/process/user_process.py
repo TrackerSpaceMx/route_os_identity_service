@@ -48,7 +48,7 @@ class UserProcess:
     
     async def update_user_by_username(self,account: str, body:dict,user_to_update:str):
         try:
-            valid_keys_to_update = ("name","username","email","phone","password_hash","recovery_email")
+            valid_keys_to_update = ("name","username","email","phone","password_hash","recovery_email","status")
             keys_to_update = [key for key in body.keys()]
             for key in keys_to_update:
                 if key not in valid_keys_to_update:
@@ -129,4 +129,13 @@ class UserProcess:
             update_process_response = await self.__dbOPerations.update_new_password_and_set_token_as_used(user_id,new_password_hashed,acccount,token)            
         except Exception as err:
             print("Error updating the new password: ",err)
+            return False
+    
+
+    async def get_users(self,account_id):
+        try:
+            users_response = await self.__dbOPerations.get_users_from_account(account_id)
+            return users_response
+        except Exception as err:
+            print("Error getting the users from table")
             return False

@@ -39,6 +39,20 @@ class MysqlOperations:
             print("Error selecting accounts:", err)
             return ()
     
+    async def select_account_by_id(self, display_id:int) -> tuple:
+        try:
+            pool = await self._get_pool()  
+            async with pool.acquire() as connection:
+                async with connection.cursor() as cursor:
+                    query = "SELECT * FROM accounts WHERE display_id = %s"
+                    await cursor.execute(query, (display_id,))
+                    results = await cursor.fetchall()
+                    if results and len(results)> 0:
+                        return results
+        except Exception as err:
+            print("Error selecting accounts:", err)
+            return ()
+    
     async def insert_user(self,user_information,account_uuid,password_hash) -> bool:
         try:
             pool = await self._get_pool()  
@@ -234,7 +248,8 @@ class MysqlOperations:
                     await cursor.execute(query,(account["slug"],account["name"],account["api_key"],account["secret_key"],account["rfc"],account["address"],account["company_name"]))
                     await connection.commit()
                     if cursor.rowcount>0:
-                        return True
+                        inserted_id = cursor.lastrowid
+                        return inserted_id
                     else:
                         return False
         except IntegrityError as err:
@@ -267,6 +282,20 @@ class MysqlOperations:
                 async with connection.cursor() as cursor:
                     query = "SELECT display_id,slug,name,company_name,rfc,created_at FROM accounts" 
                     await cursor.execute(query)
+                    results = await cursor.fetchall()
+                    if results and len(results)> 0:
+                        return results
+        except Exception as err:
+            print("Error selecting the accounts: ",err)
+            return ()
+    
+    async def select_users(self,account_id) -> tuple:
+        try:
+            pool = await self._get_pool()  
+            async with pool.acquire() as connection:
+                async with connection.cursor() as cursor:
+                    query = "SELECT username,role,created_at,email,status FROM route_os_users WHERE account_id=%s" 
+                    await cursor.execute(query,(account_id,))
                     results = await cursor.fetchall()
                     if results and len(results)> 0:
                         return results

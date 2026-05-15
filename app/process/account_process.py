@@ -1,10 +1,19 @@
+import bcrypt
 from database.operations_db import OperationsDB
+from process.user_process import UserProcess
+
 
 class AccountProcess:
     def __init__(self):
         self.__dbOperations = OperationsDB()
+        self.user_process = UserProcess()
     
-
+    @staticmethod
+    def encrypt_password(password):
+        password_hashed = bcrypt.hashpw(password.encode("utf-8"),bcrypt.gensalt())
+        password_decoded = password_hashed.decode("utf-8")
+        return password_decoded    
+    
     async def authenticate_user_account(self,user):
         authentication_result = False
         try:
@@ -30,7 +39,20 @@ class AccountProcess:
             slug_modified = slug.replace(" ","")
             account_information["slug"] = slug_modified
             account_result= await self.__dbOperations.register_account_in_table(account_information)
-            return account_result
+            if account_result:
+                account_id = await self.__dbOperations.get_account_by_id(account_result)
+                information_for_first_user={
+                    "name": "admin",
+                    "username": "admin",
+                    "email": "admin@gmail.com",
+                    "phone": "0",
+                    "password_hash": "admin123456",
+                    "recovery_email": "admin@gmail.com",
+                    "role": "admin"
+                    }
+                first_user_result=await self.user_process.create_user(account_id, information_for_first_user)
+                if first_user_result:
+                    return first_user_result
         except Exception as err:
             print("Error registering acccount:",err)
             return False

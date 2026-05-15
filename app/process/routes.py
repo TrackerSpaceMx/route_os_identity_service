@@ -21,14 +21,14 @@ account_process = AccountProcess()
 
 origins = [
     "http://localhost:5173",
-    "http://127.0.0.1:5173"
+    "http://localhost:5174"
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"], 
+    allow_methods=["GET", "POST", "PUT", "DELETE","PATCH"], 
     allow_headers=["Authorization", "Content-Type"],
 )
 security = HTTPBearer()
@@ -162,7 +162,7 @@ async def reset_password(body: ResetPassword,request:Request):
 
 
 @app.post("/users",status_code=status.HTTP_201_CREATED)
-async def create_user(body:Users,request:Request):
+async def create_user(body:Users,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
     user = body.model_dump()    
     account = request.state.account
     account_uuid= account[0][0]
@@ -172,6 +172,22 @@ async def create_user(body:Users,request:Request):
     if not user_response:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail={"message":"Error creating user"})
     return {"message":"User created successfully"}
+
+@app.get("/users",status_code=status.HTTP_200_OK)
+async def get_users(request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    account = request.state.account
+    account_uuid = account[0][0]
+    users = await user_process.get_users(account_uuid)
+    if not users:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"message":f"Server error"})
+    return {"data":users}
 
 @app.patch("/users/{username}",status_code=status.HTTP_200_OK)
 async def patch_user(username:str,body:UpdateUser, request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):

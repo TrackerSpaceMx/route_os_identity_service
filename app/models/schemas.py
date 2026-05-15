@@ -23,6 +23,7 @@ class UpdateUser(BaseModel):
     phone : Optional[str] = None
     password_hash : Optional[str] = None
     recovery_email : Optional[str] = None
+    status : Optional[int] = None
 
 
 class RecoveryPassword(BaseModel):

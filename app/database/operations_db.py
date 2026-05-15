@@ -124,3 +124,20 @@ class OperationsDB:
             return accounts
         else:
             return False
+    
+    async def get_account_by_id(self,display_id):
+        account_information = await self.__mysqlOperations.select_account_by_id(display_id)
+        account_id = account_information[0][0]
+        return account_id
+
+    
+    async def get_users_from_account(self,account_id):
+        users_response = await self.__mysqlOperations.select_users(account_id)
+        users =[]
+        if users_response:
+            for user in users_response:
+                users_information= {"username":user[0],"role":user[1],"created_at":user[2],"email":user[3],"status":user[4]}
+                users.append(users_information)
+            if len(users)>0:
+                return users
+        return False
