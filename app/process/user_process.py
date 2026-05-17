@@ -16,11 +16,13 @@ class UserProcess:
         password_decoded = password_hashed.decode("utf-8")
         return password_decoded    
 
-    async def create_user(self,account_id,user_information):
+    async def create_user(self,account_id,user_information,is_owner=0):
         try:
             account_id
             password_hash = UserProcess.encrypt_password(user_information["password_hash"])
-            return await self.__dbOPerations.insert_user_in_table(account_id,user_information,password_hash)
+            if "send_invitation" in user_information and user_information["send_invitation"] == True:
+                email_invitation = await self.send_welcome_email(user_information["email"],user_information["username"])
+            return await self.__dbOPerations.insert_user_in_table(account_id,user_information,password_hash,is_owner)
         except Exception as err:
             print("Error creating user: ",user_information,err)
             return False
@@ -64,7 +66,7 @@ class UserProcess:
             return False
     
     async def delete_user_from_table(self,account,user):
-        try:    
+        try:
             delete_result = await self.__dbOPerations.delete_user_from_database(account,user)
             if delete_result:
                 return delete_result
@@ -97,6 +99,33 @@ class UserProcess:
             return True
         except Exception as e:
             print("Error sending email:", e)
+            return False
+
+
+    async def send_welcome_email(self, to: str, username: str):
+        resend.api_key = Config.RESEND_API_KEY
+        try:
+            login_link = "http://localhost:5173/login"
+            
+            resend.Emails.send({
+                "from": "onboarding@resend.dev",
+                "to": to,
+                "subject": "Tu cuenta ha sido creada",
+                "html": f"""
+                    <h2>¡Bienvenido, {username}!</h2>
+                    <p>Tu cuenta en el sistema Route OS ha sido creada exitosamente.</p>
+                    <p>Para obtener tus credenciales de acceso, 
+                    <strong>contacta a tu administrador</strong>.</p>
+                    <a href='{login_link}'
+                    style='background:#000;color:#fff;padding:12px 24px;
+                            border-radius:6px;text-decoration:none'>
+                    Ir al sistema
+                    </a>
+                """
+            })
+            return True
+        except Exception as e:
+            print("Error sending welcome email:", e)
             return False
     
     async def get_user_by_email(self,email,account_id):

@@ -235,6 +235,11 @@ async def delete_user(username:str,request:Request,credentials: HTTPAuthorizatio
     delete_result= await user_process.delete_user_from_table(account_uuid,username)
     if not delete_result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message":f"User {username} not found"})
+    if delete_result == "FORBIDDEN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"message": "Admin can't be deleted"}
+        )
 
     return {"message":f"User {username} deleted successfully"}
 

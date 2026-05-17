@@ -10,6 +10,7 @@ class Users(BaseModel):
     password_hash : str = Field(max_length=255)
     recovery_email : str = Field(max_length=255)
     role: str   = Field(max_length=20)
+    send_invitation : Optional[bool] = False
 
 
 class UserAuthentication(BaseModel):

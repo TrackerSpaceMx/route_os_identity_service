@@ -16,11 +16,11 @@ class OperationsDB:
     async def get_account(self,slug:str):
         return await self.__mysqlOperations.select_accounts(slug)
 
-    async def insert_user_in_table(self, account_id,user_information,password_hash):
+    async def insert_user_in_table(self, account_id,user_information,password_hash,is_owner=0):
         uuid_account= account_id
         if not uuid_account:
             return False
-        return await self.__mysqlOperations.insert_user(user_information,uuid_account,password_hash)
+        return await self.__mysqlOperations.insert_user(user_information,uuid_account,password_hash,is_owner)
         
 
     async def validate_user_from_table(self,user_information,slug):
@@ -68,8 +68,13 @@ class OperationsDB:
     
 
     async def delete_user_from_database(self, account:str, username:str):
-        return await self.__mysqlOperations.delete_user(account,username)
-    
+        owner_validation = await self.__mysqlOperations.select_owner_status(username,account)
+        if owner_validation:
+            owner_status= owner_validation[0][0]
+            if owner_status ==1:
+                return "FORBIDDEN"
+            return await self.__mysqlOperations.delete_user(account,username)
+        return False
 
     async def query_user_by_email(self, email,account_id):
         user_response = await self.__mysqlOperations.select_user_email(email,account_id)
@@ -136,7 +141,7 @@ class OperationsDB:
         users =[]
         if users_response:
             for user in users_response:
-                users_information= {"username":user[0],"role":user[1],"created_at":user[2],"email":user[3],"status":user[4]}
+                users_information= {"username":user[0],"role":user[1],"created_at":user[2],"email":user[3],"status":user[4],"phone":user[5],"recovery_email":user[6]}
                 users.append(users_information)
             if len(users)>0:
                 return users

@@ -50,7 +50,7 @@ class AccountProcess:
                     "recovery_email": "admin@gmail.com",
                     "role": "admin"
                     }
-                first_user_result=await self.user_process.create_user(account_id, information_for_first_user)
+                first_user_result=await self.user_process.create_user(account_id, information_for_first_user,1)
                 if first_user_result:
                     return first_user_result
         except Exception as err:

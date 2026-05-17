@@ -53,16 +53,16 @@ class MysqlOperations:
             print("Error selecting accounts:", err)
             return ()
     
-    async def insert_user(self,user_information,account_uuid,password_hash) -> bool:
+    async def insert_user(self,user_information,account_uuid,password_hash,owner=0) -> bool:
         try:
             pool = await self._get_pool()  
             async with pool.acquire() as connection:
                 async with connection.cursor() as cursor:
                     query = """INSERT INTO 
-                                route_os_users(account_id,name,username,email,phone,password_hash,recovery_email,role)
-                                VALUES(%s,%s,%s,%s,%s,%s,%s,%s)"""
+                                route_os_users(account_id,name,username,email,phone,password_hash,recovery_email,role,is_owner)
+                                VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
 
-                    await cursor.execute(query,(account_uuid,user_information["name"],user_information["username"],user_information["email"],user_information["phone"],password_hash,user_information["recovery_email"],user_information["role"]))
+                    await cursor.execute(query,(account_uuid,user_information["name"],user_information["username"],user_information["email"],user_information["phone"],password_hash,user_information["recovery_email"],user_information["role"],owner))
                     await connection.commit()
                     if cursor.rowcount>0:
                         return True
@@ -82,6 +82,21 @@ class MysqlOperations:
             async with pool.acquire() as connection:
                 async with connection.cursor() as cursor:
                     query = "SELECT username,password_hash,id , role FROM route_os_users WHERE username= %s and account_id=%s" 
+                    await cursor.execute(query,(user,account))
+                    results = await cursor.fetchall()
+                    if results and len(results)> 0:
+                        return results
+        except Exception as err:
+            print("Error selecting the user: ",err)
+            return ()
+    
+
+    async def select_owner_status(self, user:str, account:str) -> tuple:
+        try:
+            pool = await self._get_pool()  
+            async with pool.acquire() as connection:
+                async with connection.cursor() as cursor:
+                    query = "SELECT is_owner FROM route_os_users WHERE username= %s and account_id=%s" 
                     await cursor.execute(query,(user,account))
                     results = await cursor.fetchall()
                     if results and len(results)> 0:
@@ -129,13 +144,13 @@ class MysqlOperations:
             pool = await self._get_pool()
             async with pool.acquire() as connection:
                 async with connection.cursor() as cursor:
-                    query = "DELETE FROM route_os_users WHERE account_id = %s AND username = %s"
+                    query = "DELETE FROM route_os_users WHERE account_id = %s AND username = %s and is_owner=0"
                     await cursor.execute(query, (account, username))
                     await connection.commit()
                     return cursor.rowcount > 0
         except Exception as err:
             print("Error deleting user:", err)
-            return False
+            return False 
     
     async def select_user_email(self, email:str, account:str) -> tuple:
         try:
@@ -294,7 +309,7 @@ class MysqlOperations:
             pool = await self._get_pool()  
             async with pool.acquire() as connection:
                 async with connection.cursor() as cursor:
-                    query = "SELECT username,role,created_at,email,status FROM route_os_users WHERE account_id=%s" 
+                    query = "SELECT username,role,created_at,email,status,phone,recovery_email FROM route_os_users WHERE account_id=%s" 
                     await cursor.execute(query,(account_id,))
                     results = await cursor.fetchall()
                     if results and len(results)> 0:
