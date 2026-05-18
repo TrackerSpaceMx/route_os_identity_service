@@ -5,10 +5,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer,HTTPAuthorizationCredentials
 from jose import JWTError,jwt
 from datetime import datetime,timedelta
-from models.schemas import Users,UserAuthentication,UpdateUser,RecoveryPassword,ResetPassword,Account
+from models.schemas import Users,UserAuthentication,UpdateUser,RecoveryPassword,ResetPassword,Account,PointsOfInterest
 from control.configuration import Config
 from process.user_process import UserProcess
 from process.account_process import AccountProcess
+from process.routes_process import RoutesProcess
 from starlette.middleware.base import BaseHTTPMiddleware
 import secrets
 
@@ -17,6 +18,7 @@ import secrets
 app = FastAPI()
 user_process = UserProcess()
 account_process = AccountProcess()
+routes_process = RoutesProcess()
 
 
 origins = [
@@ -163,6 +165,15 @@ async def reset_password(body: ResetPassword,request:Request):
 
 @app.post("/users",status_code=status.HTTP_201_CREATED)
 async def create_user(body:Users,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    if role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                          detail={"message": "Not enough permissions"})
     user = body.model_dump()    
     account = request.state.account
     account_uuid= account[0][0]
@@ -334,7 +345,71 @@ async def get_accounts(credentials: HTTPAuthorizationCredentials = Depends(secur
     return {"data": accounts_response}
 
 
+
+@app.post("/points",status_code=status.HTTP_201_CREATED)
+async def create_user(body:PointsOfInterest,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+        user_id = payload.get("user_id")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    if role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                          detail={"message": "Not enough permissions"})
+    point_information = body.model_dump()
+    account = request.state.account
+    account_uuid= account[0][0]
+    point_response= await routes_process.create_point(point_information,account_uuid,user_id)
+    if not point_response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail={"message":"Error creating point"})
+    return {"message":"Point created successfully"}
+
+
+
+@app.get("/points",status_code=status.HTTP_200_OK)
+async def get_users(request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    account = request.state.account
+    account_uuid = account[0][0]
+    points_response = await routes_process.get_points(account_uuid)
+
+    if points_response == "NO_CONTENT":
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if not points_response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"message":f"Server error"})
+    return {"data":points_response}
+
+
+
+@app.delete("/points/{point_id}",status_code=status.HTTP_200_OK)
+async def delete_point(point_id:str,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+        user_id = payload.get("user_id")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    if role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                          detail={"message": "Not enough permissions"})
     
+    account = request.state.account
+    account_uuid = account[0][0]
+    delete_result= await routes_process.remove_point(point_id,user_id,account_uuid)
+    if not delete_result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message":f"Point {point_id} not found"})
+
+
+    return {"message":f"Point {point_id} deleted successfully"}
 
     
 @app.get("/scalar",include_in_schema=False)

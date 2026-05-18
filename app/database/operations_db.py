@@ -146,3 +146,34 @@ class OperationsDB:
             if len(users)>0:
                 return users
         return False
+    
+
+    async def register_point_in_table(self,point_information,account_id,user_id):
+        return await self.__mysqlOperations.insert_point(point_information,account_id,user_id)
+
+
+    async def get_points_from_table(self,account_id):
+        
+        points_result = await self.__mysqlOperations.select_points(account_id) 
+        points =[]
+        if points_result:
+            for point in points_result:
+                point_information ={
+                    "id":point[0],
+                    "created_by":point[7],
+                    "point_name":  point[2],
+                    "category": point[3],
+                    "coordinates": [point[4],point[5]],
+                    "radius": point[8],
+                    "created_at": point[6]
+                }
+                points.append(point_information)
+            return points
+        else:
+            return "NO_CONTENT"
+
+
+
+
+    async def remove_point_for_table(self,point_id,user_id,account_id):
+        return await self.__mysqlOperations.delete_point(point_id,user_id,account_id)

@@ -43,3 +43,11 @@ class Account(BaseModel):
     rfc: str
     address: str
     company_name:str
+
+
+class PointsOfInterest(BaseModel):
+    point_name :str
+    category : str
+    latidude : str
+    longitude : str
+    radius_meter : int

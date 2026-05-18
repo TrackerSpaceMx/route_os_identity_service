@@ -317,3 +317,69 @@ class MysqlOperations:
         except Exception as err:
             print("Error selecting the accounts: ",err)
             return ()
+
+    async def insert_point(self,point_information,account_uuid,user_id) -> bool:
+        try:
+            pool = await self._get_pool()  
+            async with pool.acquire() as connection:
+                async with connection.cursor() as cursor:
+                    query = """INSERT INTO 
+                                points_of_interest(account_id,user_id,point_name,category,latitude,longitude,radius_meters)
+                                VALUES(%s,%s,%s,%s,%s,%s,%s)"""
+
+                    await cursor.execute(query,(account_uuid,user_id,point_information["point_name"],point_information["category"],point_information["latidude"],point_information["longitude"],point_information["radius_meter"]))
+                    await connection.commit()
+                    if cursor.rowcount>0:
+                        return True
+                    else:
+                        return False
+        except IntegrityError as err:
+            if err.args[0] == 1062:
+                return "DUPLICATE"
+            return False
+        except Exception as err:
+            print("Error inserting user in table: ",err)
+            return False
+    
+
+    async def select_points(self, account_id) -> tuple:
+        try:
+            pool = await self._get_pool()  
+            async with pool.acquire() as connection:
+                async with connection.cursor() as cursor:
+                    query = """
+                        SELECT 
+                            point.display_id,
+                            point.user_id,
+                            point.point_name,
+                            point.category,
+                            point.latitude,
+                            point.longitude,
+                            point.created_at,
+                            user.username AS created_by_name,
+                            point.radius_meters
+                        FROM points_of_interest point
+                        INNER JOIN route_os_users user ON user.id = point.user_id
+                        WHERE point.account_id = %s
+                    """
+                    await cursor.execute(query, (account_id,))
+                    results = await cursor.fetchall()
+                    if results and len(results) > 0:
+                        return results
+                    return ()
+        except Exception as err:
+            print("Error selecting the accounts: ", err)
+            return ()
+
+    async def delete_point(self, point_id,user_id,account_id) -> bool:
+        try:
+            pool = await self._get_pool()
+            async with pool.acquire() as connection:
+                async with connection.cursor() as cursor:
+                    query = "DELETE FROM points_of_interest WHERE display_id = %s AND user_id = %s and account_id=%s"
+                    await cursor.execute(query, (point_id,user_id,account_id))
+                    await connection.commit()
+                    return cursor.rowcount > 0
+        except Exception as err:
+            print("Error deleting user:", err)
+            return False 
