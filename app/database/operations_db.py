@@ -172,8 +172,9 @@ class OperationsDB:
         else:
             return "NO_CONTENT"
 
-
-
-
     async def remove_point_for_table(self,point_id,user_id,account_id):
         return await self.__mysqlOperations.delete_point(point_id,user_id,account_id)
+
+
+    async def create_route_in_table(self,route_body,account_id,user_id):
+        return await self.__mysqlOperations.insert_route(route_body,account_id,user_id)

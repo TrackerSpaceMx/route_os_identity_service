@@ -1,12 +1,14 @@
 import bcrypt
 from database.operations_db import OperationsDB
 from process.user_process import UserProcess
+from process.vehicles_process import VehichlesProcess
 
 
 class AccountProcess:
     def __init__(self):
         self.__dbOperations = OperationsDB()
         self.user_process = UserProcess()
+        self.vehicle_process = VehichlesProcess()
     
     @staticmethod
     def encrypt_password(password):
@@ -38,21 +40,27 @@ class AccountProcess:
             slug = account_information["slug"]          
             slug_modified = slug.replace(" ","")
             account_information["slug"] = slug_modified
-            account_result= await self.__dbOperations.register_account_in_table(account_information)
-            if account_result:
-                account_id = await self.__dbOperations.get_account_by_id(account_result)
-                information_for_first_user={
-                    "name": "admin",
-                    "username": "admin",
-                    "email": "admin@gmail.com",
-                    "phone": "0",
-                    "password_hash": "admin123456",
-                    "recovery_email": "admin@gmail.com",
-                    "role": "admin"
-                    }
-                first_user_result=await self.user_process.create_user(account_id, information_for_first_user,1)
-                if first_user_result:
-                    return first_user_result
+            api_key = account_information["api_key"]
+            secret_key = account_information["secret_key"]
+            keys_validation = await self.vehicle_process.validate_fulltrack_keys(api_key,secret_key)
+            if keys_validation:
+                account_result= await self.__dbOperations.register_account_in_table(account_information)
+                if account_result:
+                    account_id = await self.__dbOperations.get_account_by_id(account_result)
+                    information_for_first_user={
+                        "name": "admin",
+                        "username": "admin",
+                        "email": "admin@gmail.com",
+                        "phone": "0",
+                        "password_hash": "admin123456",
+                        "recovery_email": "admin@gmail.com",
+                        "role": "admin"
+                        }
+                    first_user_result=await self.user_process.create_user(account_id, information_for_first_user,1)
+                    if first_user_result:
+                        return first_user_result
+            else:
+                return "Unauthorized"
         except Exception as err:
             print("Error registering acccount:",err)
             return False

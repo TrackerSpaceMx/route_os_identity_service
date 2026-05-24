@@ -28,3 +28,13 @@ class RoutesProcess:
         except Exception as err:
             print("Error deleting point: ",err)
             return False
+
+    async def create_route(self,route_body,account_id,user_id):
+        try:
+            print("here to create route: ",route_body)
+            route_creation_response = await self._dbOperations.create_route_in_table(route_body,account_id,user_id)
+            return route_creation_response
+        except Exception as err:
+            print("Error creating the route: ",err)
+
+    

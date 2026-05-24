@@ -3,7 +3,7 @@ from asyncmy.pool import Pool
 from asyncmy.errors import IntegrityError
 from control.configuration import Config
 import asyncio
-
+import json
 import traceback
 
 class MysqlOperations:
@@ -383,3 +383,28 @@ class MysqlOperations:
         except Exception as err:
             print("Error deleting user:", err)
             return False 
+    
+
+    async def insert_route(self,route_body:dict,account_id:str,user_id:str) -> bool:
+        try:
+            pool = await self._get_pool()  
+            async with pool.acquire() as connection:
+                async with connection.cursor() as cursor:
+                    query = """INSERT INTO 
+                                routeos_os_routes(account_id,vehicle,driver,created_by,route_name,active_days)
+                                VALUES(%s,%s,%s,%s,%s,%s)"""
+
+                    await cursor.execute(query,(account_id,route_body["vehicle"],route_body["driver"],user_id,route_body["route_name"],json.dumps(route_body["active_days"])))
+                    await connection.commit()
+                    if cursor.rowcount>0:
+                        inserted_id = cursor.lastrowid
+                        return inserted_id
+                    else:
+                        return False
+        except IntegrityError as err:
+            if err.args[0] == 1062:
+                return "DUPLICATE"
+            return False
+        except Exception as err:
+            print("Error inserting route in table: ",err)
+            return False

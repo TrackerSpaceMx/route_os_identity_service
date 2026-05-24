@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer,HTTPAuthorizationCredentials
 from jose import JWTError,jwt
 from datetime import datetime,timedelta
-from models.schemas import Users,UserAuthentication,UpdateUser,RecoveryPassword,ResetPassword,Account,PointsOfInterest
+from models.schemas import Users,UserAuthentication,UpdateUser,RecoveryPassword,ResetPassword,Account,PointsOfInterest,RoutesCreation
 from control.configuration import Config
 from process.user_process import UserProcess
 from process.account_process import AccountProcess
@@ -280,6 +280,9 @@ async def create_account(body: Account, credentials: HTTPAuthorizationCredential
 
     if create_account_response =="DUPLICATE":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail={"message":"Account already created"})
+    
+    elif create_account_response == "Unauthorized":
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,detail={"message":"invalid keys"})
 
     return {"message":"Account created successfully"}
 
@@ -364,6 +367,9 @@ async def create_user(body:PointsOfInterest,request:Request,credentials: HTTPAut
     point_response= await routes_process.create_point(point_information,account_uuid,user_id)
     if not point_response:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail={"message":"Error creating point"})
+    
+    if point_response =="DUPLICATE":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail={"message":"Point already created"})
     return {"message":"Point created successfully"}
 
 
@@ -410,6 +416,31 @@ async def delete_point(point_id:str,request:Request,credentials: HTTPAuthorizati
 
 
     return {"message":f"Point {point_id} deleted successfully"}
+
+
+@app.post("/routes",status_code=status.HTTP_201_CREATED)
+async def create_user(body:RoutesCreation,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+        user_id = payload.get("user_id")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    if role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                          detail={"message": "Not enough permissions"})
+    route_body = body.model_dump()
+    account = request.state.account
+    account_uuid= account[0][0]
+    route_response= await routes_process.create_route(route_body,account_uuid,user_id)
+    if not route_response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail={"message":"Error creating route"})
+
+    if route_response =="DUPLICATE":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail={"message":"Route already created"})
+    return {"message":"Route created successfully"}
+
 
     
 @app.get("/scalar",include_in_schema=False)
