@@ -160,12 +160,13 @@ class OperationsDB:
             for point in points_result:
                 point_information ={
                     "id":point[0],
-                    "created_by":point[7],
-                    "point_name":  point[2],
-                    "category": point[3],
-                    "coordinates": [point[4],point[5]],
-                    "radius": point[8],
-                    "created_at": point[6]
+                    "point_id":point[1],
+                    "created_by":point[8],
+                    "point_name":  point[3],
+                    "category": point[4],
+                    "coordinates": [point[5],point[6]],
+                    "radius": point[9],
+                    "created_at": point[7]
                 }
                 points.append(point_information)
             return points
@@ -177,4 +178,35 @@ class OperationsDB:
 
 
     async def create_route_in_table(self,route_body,account_id,user_id):
-        return await self.__mysqlOperations.insert_route(route_body,account_id,user_id)
+        points = route_body.get("points",[])
+        print("points: ",points)
+
+        route_response = await self.__mysqlOperations.insert_route(route_body,account_id,user_id)
+        waypoints_of_the_route=[]
+        if route_response:
+            route_id = await self.__mysqlOperations.select_route_by_display_id(route_response)
+            print("ROUTE ID: ",route_id)
+            if route_id and len(route_id)>0:
+                route_id_mysql = route_id[0][0]
+                for waypoint in points:
+                    print("waypoint: ",waypoint)
+                    value_mysql =(route_id_mysql,waypoint["point_id"],waypoint["id"],waypoint["point_name"],waypoint["dwell_time"])
+                    waypoints_of_the_route.append(value_mysql)
+                
+                waypoints_response = await self.__mysqlOperations.insert_waypoints(waypoints_of_the_route)
+                return waypoints_of_the_route
+            else:
+                return False
+        else:
+            return False
+    
+        # return True
+    
+    async def get_keys_from_table(self,account_id):
+        keys_response = await self.__mysqlOperations.select_keys(account_id)
+        if keys_response and len(keys_response)>0:
+            api_key = keys_response[0][0]
+            secret_key = keys_response[0][1]
+            return api_key,secret_key
+        else:
+            return False,False

@@ -21,9 +21,15 @@ class MysqlOperations:
                         user=Config.DB_USER,
                         password=Config.DB_PASSWORD,
                         charset="utf8mb4",
-                        maxsize=5
+                        maxsize=15,
+                        minsize=3,
+                        pool_recycle=1800
                     )
         return cls._pool
+    
+    async def pool_status(self):
+        pool = await self._get_pool()
+        print(f"Free: {pool.freesize} | Used: {pool.size - pool.freesize} | Max: {pool.maxsize}")
 
     async def select_accounts(self, slug_account:str) -> tuple:
         try:
@@ -350,6 +356,7 @@ class MysqlOperations:
                     query = """
                         SELECT 
                             point.display_id,
+                            point.id,
                             point.user_id,
                             point.point_name,
                             point.category,
@@ -408,3 +415,53 @@ class MysqlOperations:
         except Exception as err:
             print("Error inserting route in table: ",err)
             return False
+    
+
+    async def insert_waypoints(self,waypoints:list) -> bool:
+        try:
+            pool = await self._get_pool()  
+            async with pool.acquire() as connection:
+                async with connection.cursor() as cursor:
+                    query = """INSERT INTO 
+                                route_os_waypoints(route_id,poi_id,sequence_order,label,dwell_time)
+                                VALUES(%s,%s,%s,%s,%s)"""
+
+                    await cursor.executemany(query,waypoints)
+                    await connection.commit()
+                    if cursor.rowcount>0:
+                        return True
+                    else:
+                        return False
+        except Exception as err:
+            print("Error inserting route in table: ",err)
+            return False
+    
+    async def select_keys(self,account_id) -> tuple:
+        try:
+            pool = await self._get_pool()  
+            async with pool.acquire() as connection:
+                async with connection.cursor() as cursor:
+                    query = "SELECT api_key_hash,secret_key_hash FROM accounts WHERE id=%s" 
+                    await cursor.execute(query,(account_id,))
+                    results = await cursor.fetchall()
+                    if results and len(results)> 0:
+                        return results
+        except Exception as err:
+            print("Error selecting the keys: ",err)
+            return ()
+    
+
+
+    async def select_route_by_display_id(self,display_id) -> tuple:
+        try:
+            pool = await self._get_pool()  
+            async with pool.acquire() as connection:
+                async with connection.cursor() as cursor:
+                    query = "SELECT id FROM routeos_os_routes WHERE display_id=%s" 
+                    await cursor.execute(query,(display_id,))
+                    results = await cursor.fetchall()
+                    if results and len(results)> 0:
+                        return results
+        except Exception as err:
+            print("Error selecting the keys: ",err)
+            return ()

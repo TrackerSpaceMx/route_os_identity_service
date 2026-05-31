@@ -10,6 +10,7 @@ from control.configuration import Config
 from process.user_process import UserProcess
 from process.account_process import AccountProcess
 from process.routes_process import RoutesProcess
+from process.vehicles_process import VehichlesProcess
 from starlette.middleware.base import BaseHTTPMiddleware
 import secrets
 
@@ -19,6 +20,7 @@ app = FastAPI()
 user_process = UserProcess()
 account_process = AccountProcess()
 routes_process = RoutesProcess()
+vehicle_process = VehichlesProcess()
 
 
 origins = [
@@ -442,7 +444,27 @@ async def create_user(body:RoutesCreation,request:Request,credentials: HTTPAutho
     return {"message":"Route created successfully"}
 
 
-    
+
+@app.get("/vehicles",status_code=status.HTTP_200_OK)
+async def get_users(request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    account = request.state.account
+    account_uuid = account[0][0]
+    vehicles_response = await vehicle_process.show_vehicles(account_uuid)
+
+    if vehicles_response == "NO_CONTENT":
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if not vehicles_response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"message":f"Server error"})
+    return {"data":vehicles_response}
+
+
 @app.get("/scalar",include_in_schema=False)
 def get_scalar_docs():
     return get_scalar_api_reference(openapi_url=app.openapi_url,title="Documentation")

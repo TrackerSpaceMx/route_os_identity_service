@@ -57,6 +57,7 @@ class RoutesCreation(BaseModel):
     driver: Optional[str] = None
     route_name : str
     active_days : list[str]
+    points : list[dict]
 
 
 
