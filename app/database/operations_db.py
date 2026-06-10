@@ -210,3 +210,31 @@ class OperationsDB:
             return api_key,secret_key
         else:
             return False,False
+    
+
+    async def insert_driver_in_table(self,driver_information,account_id):
+        return await self.__mysqlOperations.insert_driver(driver_information,account_id)
+    
+
+    async def get_drivers_from_table(self,account_id):
+        drivers_response = await self.__mysqlOperations.select_drivers(account_id)
+        drivers=[]
+        if drivers_response and len(drivers_response)>0:
+            for driver in drivers_response:
+                driver_structure= {"id":driver[0],"name":driver[1],"gender":driver[2],"phone":driver[3],"address":driver[4]}
+                drivers.append(driver_structure)
+            return drivers
+        else:
+            return "NO_CONTENT"
+    
+
+    async def remove_driver_from_table(self,driver_id, user_id, account_id):
+        remove_driver_response = await self.__mysqlOperations.delete_driver(driver_id,user_id,account_id)
+        return remove_driver_response
+    
+    async def update_driver_by_id(self,account_id,driver_information,driver_id):
+        print("accoumt_ id",account_id)
+        print("information: ",driver_information)
+        print("driver id: ",driver_id)
+        driver_response = await self.__mysqlOperations.update_driver(account_id,driver_information,driver_id)
+        return driver_response

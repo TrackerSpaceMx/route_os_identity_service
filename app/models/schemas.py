@@ -60,5 +60,16 @@ class RoutesCreation(BaseModel):
     points : list[dict]
 
 
+class Drivers(BaseModel):
+    name:str
+    sex:str
+    phone:str
+    address:str
 
 
+
+class UpdateDriver(BaseModel):
+    name : Optional[str] = None
+    sex : Optional[str] = None
+    phone : Optional[str] = None
+    address : Optional[str] = None

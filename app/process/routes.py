@@ -5,12 +5,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer,HTTPAuthorizationCredentials
 from jose import JWTError,jwt
 from datetime import datetime,timedelta
-from models.schemas import Users,UserAuthentication,UpdateUser,RecoveryPassword,ResetPassword,Account,PointsOfInterest,RoutesCreation
+from models.schemas import Users,UserAuthentication,UpdateUser,RecoveryPassword,ResetPassword,Account,PointsOfInterest,RoutesCreation,Drivers,UpdateDriver
 from control.configuration import Config
 from process.user_process import UserProcess
 from process.account_process import AccountProcess
 from process.routes_process import RoutesProcess
 from process.vehicles_process import VehichlesProcess
+from process.driver_process import DriverProcess
 from starlette.middleware.base import BaseHTTPMiddleware
 import secrets
 
@@ -21,6 +22,7 @@ user_process = UserProcess()
 account_process = AccountProcess()
 routes_process = RoutesProcess()
 vehicle_process = VehichlesProcess()
+driver_process = DriverProcess()
 
 
 origins = [
@@ -465,7 +467,99 @@ async def get_users(request:Request,credentials: HTTPAuthorizationCredentials = 
     return {"data":vehicles_response}
 
 
+@app.post("/drivers",status_code=status.HTTP_201_CREATED)
+async def create_user(body:Drivers,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    if role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                          detail={"message": "Not enough permissions"})
+    driver = body.model_dump()    
+    account = request.state.account
+    account_uuid= account[0][0]
+    driver_response= await driver_process.create_driver(driver,account_uuid)
+    if driver_response =="DUPLICATE":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail={"message":"Driver already created"})
+    if not driver_response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail={"message":"Error creating driver"})
+    return {"message":"Driver created successfully"}
+
+
+@app.get("/drivers",status_code=status.HTTP_200_OK)
+async def get_users(request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    account = request.state.account
+    account_uuid = account[0][0]
+    vehicles_response = await driver_process.show_drivers(account_uuid)
+
+    if vehicles_response == "NO_CONTENT":
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if not vehicles_response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"message":f"Server error"})
+    return {"data":vehicles_response}
+
+
+@app.delete("/drivers/{driver_id}",status_code=status.HTTP_200_OK)
+async def delete_point(driver_id:str,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+        user_id = payload.get("user_id")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    if role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                          detail={"message": "Not enough permissions"})
+    
+    account = request.state.account
+    account_uuid = account[0][0]
+    delete_result= await driver_process.remove_driver(driver_id,user_id,account_uuid)
+    if not delete_result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message":f"Driver {driver_id} not found"})
+
+
+    return {"message":f"Driver {driver_id} deleted successfully"}
+
+
+@app.patch("/drivers/{driver_id}",status_code=status.HTTP_200_OK)
+async def patch_user(driver_id:str,body:UpdateDriver, request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    if role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                          detail={"message": "Not enough permissions"})
+
+    account = request.state.account
+    account_uuid = account[0][0]
+    update_data = body.model_dump(exclude_none=True)
+    if not update_data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                          detail={"message": "No fields to update"})
+
+    update_response = await driver_process.update_driver(account_uuid,update_data,driver_id)
+    if not update_response:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message":"Driver not found"})
+
+    if update_response == "DUPLICATE":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail={"message":"driver already created"})
+    
+    return {"message":"Driver updated successfully"}
+
 @app.get("/scalar",include_in_schema=False)
 def get_scalar_docs():
     return get_scalar_api_reference(openapi_url=app.openapi_url,title="Documentation")
-
