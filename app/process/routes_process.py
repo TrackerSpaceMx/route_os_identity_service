@@ -36,4 +36,27 @@ class RoutesProcess:
         except Exception as err:
             print("Error creating the route: ",err)
 
-    
+    async def get_routes(self,account_id):
+        try:
+            routes = await self._dbOperations.get_routes_from_table(account_id)
+            return routes
+        except Exception as err:
+            print("Error getting the routes: ",err)
+            return None
+
+
+    async def get_waypoints_from_route(self,route_id):
+        try:
+            waypoints_response = await self._dbOperations.get_waypoints_from_table(route_id)
+            return waypoints_response
+        except Exception as err:
+            print("Error getting the waypoints from route:" ,err,route_id)
+            return None
+
+    async def delete_route_from_table(self,account_id,route_id):
+        try:
+            route_deletion_response = await self._dbOperations.remove_route_from_table(account_id,route_id)
+            return route_deletion_response
+        except Exception as err:
+            print("Error deleting route:",err)
+            return None

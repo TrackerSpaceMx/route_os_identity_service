@@ -354,7 +354,7 @@ async def get_accounts(credentials: HTTPAuthorizationCredentials = Depends(secur
 
 
 @app.post("/points",status_code=status.HTTP_201_CREATED)
-async def create_user(body:PointsOfInterest,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def create_point(body:PointsOfInterest,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
     try:
         payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
@@ -379,7 +379,7 @@ async def create_user(body:PointsOfInterest,request:Request,credentials: HTTPAut
 
 
 @app.get("/points",status_code=status.HTTP_200_OK)
-async def get_users(request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def get_points(request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
     try:
         payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
@@ -423,7 +423,7 @@ async def delete_point(point_id:str,request:Request,credentials: HTTPAuthorizati
 
 
 @app.post("/routes",status_code=status.HTTP_201_CREATED)
-async def create_user(body:RoutesCreation,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def create_route(body:RoutesCreation,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
     try:
         payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
@@ -446,9 +446,71 @@ async def create_user(body:RoutesCreation,request:Request,credentials: HTTPAutho
     return {"message":"Route created successfully"}
 
 
+@app.get("/routes",status_code=status.HTTP_200_OK)
+async def get_routes(request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    account = request.state.account
+    account_uuid = account[0][0]
+    vehicles_response = await routes_process.get_routes(account_uuid)
+
+    if vehicles_response == "NO_CONTENT":
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if not vehicles_response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"message":f"Server error"})
+    return {"data":vehicles_response}
+
+
+@app.get("/routes/waypoints/{route_id}",status_code=status.HTTP_200_OK)
+async def get_routes(route_id:str,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    account = request.state.account
+    account_uuid = account[0][0]
+    waypoints_response = await routes_process.get_waypoints_from_route(route_id)
+
+    if waypoints_response == "NO_CONTENT":
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if not waypoints_response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"message":f"Server error"})
+    return {"data":waypoints_response}
+
+
+@app.delete("/routes/{route_id}",status_code=status.HTTP_200_OK)
+async def delete_route(route_id:str,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+        user_id = payload.get("user_id")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    if role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                          detail={"message": "Not enough permissions"})
+    
+    account = request.state.account
+    account_uuid = account[0][0]
+    delete_result= await routes_process.delete_route_from_table(account_uuid,route_id)
+    if not delete_result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message":f"Route {route_id} not found"})
+
+
+    return {"message":f"Route {route_id} deleted successfully"}
+
 
 @app.get("/vehicles",status_code=status.HTTP_200_OK)
-async def get_users(request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def get_vehicles(request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
     try:
         payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
@@ -468,7 +530,7 @@ async def get_users(request:Request,credentials: HTTPAuthorizationCredentials = 
 
 
 @app.post("/drivers",status_code=status.HTTP_201_CREATED)
-async def create_user(body:Drivers,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def create_driver(body:Drivers,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
     try:
         payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
@@ -490,7 +552,7 @@ async def create_user(body:Drivers,request:Request,credentials: HTTPAuthorizatio
 
 
 @app.get("/drivers",status_code=status.HTTP_200_OK)
-async def get_users(request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def get_drivers(request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
     try:
         payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
@@ -510,7 +572,7 @@ async def get_users(request:Request,credentials: HTTPAuthorizationCredentials = 
 
 
 @app.delete("/drivers/{driver_id}",status_code=status.HTTP_200_OK)
-async def delete_point(driver_id:str,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def delete_driver(driver_id:str,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
     try:
         payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
@@ -533,7 +595,7 @@ async def delete_point(driver_id:str,request:Request,credentials: HTTPAuthorizat
 
 
 @app.patch("/drivers/{driver_id}",status_code=status.HTTP_200_OK)
-async def patch_user(driver_id:str,body:UpdateDriver, request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def patch_driver(driver_id:str,body:UpdateDriver, request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
     try:
         payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])

@@ -179,17 +179,13 @@ class OperationsDB:
 
     async def create_route_in_table(self,route_body,account_id,user_id):
         points = route_body.get("points",[])
-        print("points: ",points)
-
         route_response = await self.__mysqlOperations.insert_route(route_body,account_id,user_id)
         waypoints_of_the_route=[]
         if route_response:
             route_id = await self.__mysqlOperations.select_route_by_display_id(route_response)
-            print("ROUTE ID: ",route_id)
             if route_id and len(route_id)>0:
                 route_id_mysql = route_id[0][0]
                 for waypoint in points:
-                    print("waypoint: ",waypoint)
                     value_mysql =(route_id_mysql,waypoint["point_id"],waypoint["id"],waypoint["point_name"],waypoint["dwell_time"])
                     waypoints_of_the_route.append(value_mysql)
                 
@@ -233,8 +229,33 @@ class OperationsDB:
         return remove_driver_response
     
     async def update_driver_by_id(self,account_id,driver_information,driver_id):
-        print("accoumt_ id",account_id)
-        print("information: ",driver_information)
-        print("driver id: ",driver_id)
         driver_response = await self.__mysqlOperations.update_driver(account_id,driver_information,driver_id)
         return driver_response
+
+    async def get_routes_from_table(self,account_id):
+        routes_response = await self.__mysqlOperations.select_routes(account_id)
+        routes =[]
+        if routes_response:
+            for route in routes_response:
+                route_structure = {"route_id":route[0],"route_name":route[1],"creation_date":route[2],"created_by":route[3]}
+                routes.append(route_structure)
+            return routes
+        else:
+            return "NO_CONTENT"
+
+
+    async def get_waypoints_from_table(self,route_id):
+            waypoints_response = await self.__mysqlOperations.select_waypoints(route_id)
+            waypoints =[]
+            if waypoints_response:
+                for waypoint in waypoints_response:
+                    waypoint_structure = {"waypoint_id":waypoint[0],"route_id":waypoint[1],"waypoint_order":waypoint[2],"waypoint_label":waypoint[3]}
+                    waypoints.append(waypoint_structure)
+                return waypoints
+            else:
+                return "NO_CONTENT"
+
+
+    async def remove_route_from_table(self, account_id,route_id):
+            remove_route_response = await self.__mysqlOperations.delete_route(account_id,route_id)
+            return remove_route_response

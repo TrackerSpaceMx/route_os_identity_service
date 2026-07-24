@@ -315,9 +315,9 @@ class MysqlOperations:
     async def insert_route(self, route_body: dict, account_id: str, user_id: str):
         try:
             return await self._execute(
-                """INSERT INTO routeos_os_routes(account_id,vehicle,driver,created_by,route_name,active_days)
-                   VALUES(%s,%s,%s,%s,%s,%s)""",
-                (account_id, route_body["vehicle"], route_body["driver"],
+                """INSERT INTO routeos_os_routes(account_id,created_by,route_name,active_days)
+                   VALUES(%s,%s,%s,%s)""",
+                (account_id,
                  user_id, route_body["route_name"], json.dumps(route_body["active_days"]))
             )
         except IntegrityError as err:
@@ -396,3 +396,42 @@ class MysqlOperations:
         except Exception as err:
             print("Error updating user:", err)
             return False
+
+
+    async def select_routes(self, account_id) -> tuple:
+        try:
+            return await self._fetch(
+                """
+                SELECT r.id, r.route_name, r.created_at, u.username
+                FROM routeos_os_routes r
+                JOIN route_os_users u ON r.created_by = u.id
+                WHERE r.account_id = %s
+                """,
+                (account_id,)
+            )
+        except Exception as err:
+            print("Error selecting the routes:", err)
+            return ()
+
+
+    
+    async def select_waypoints(self, route_id) -> tuple:
+        try:
+            return await self._fetch(
+                            "SELECT id,route_id,sequence_order,label FROM route_os_waypoints WHERE route_id=%s ",
+                            (route_id,)
+                        )
+        except Exception as err:
+            print("Error selecting the routes:", err)
+            return ()
+
+
+    async def delete_route(self, account_id,route_id) -> bool:
+            try:
+                return await self._execute(
+                    "DELETE FROM routeos_os_routes WHERE account_id=%s  AND id=%s",
+                    (account_id,route_id)
+                )
+            except Exception as err:
+                print("Error deleting driver:", err)
+                return False

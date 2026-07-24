@@ -53,8 +53,6 @@ class PointsOfInterest(BaseModel):
     radius_meter : int
 
 class RoutesCreation(BaseModel):
-    vehicle: str
-    driver: Optional[str] = None
     route_name : str
     active_days : list[str]
     points : list[dict]
