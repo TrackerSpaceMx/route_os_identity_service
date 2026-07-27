@@ -366,6 +366,7 @@ async def create_point(body:PointsOfInterest,request:Request,credentials: HTTPAu
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                           detail={"message": "Not enough permissions"})
     point_information = body.model_dump()
+    point_name = point_information["point_name"]
     account = request.state.account
     account_uuid= account[0][0]
     point_response= await routes_process.create_point(point_information,account_uuid,user_id)
@@ -373,7 +374,7 @@ async def create_point(body:PointsOfInterest,request:Request,credentials: HTTPAu
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail={"message":"Error creating point"})
     
     if point_response =="DUPLICATE":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail={"message":"Point already created"})
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail={"message":f"Point {point_name} already created"})
     return {"message":"Point created successfully"}
 
 
@@ -415,8 +416,14 @@ async def delete_point(point_id:str,request:Request,credentials: HTTPAuthorizati
     account = request.state.account
     account_uuid = account[0][0]
     delete_result= await routes_process.remove_point(point_id,user_id,account_uuid)
+    print("DELETION RESULT: ",delete_result)
+    deletion_status = delete_result.get("deleted")
     if not delete_result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message":f"Point {point_id} not found"})
+
+    if deletion_status == False:
+        route_in_used = delete_result.get("route_name")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail={"message":f"Point in used by the route: {route_in_used}"})
 
 
     return {"message":f"Point {point_id} deleted successfully"}
@@ -437,12 +444,13 @@ async def create_route(body:RoutesCreation,request:Request,credentials: HTTPAuth
     route_body = body.model_dump()
     account = request.state.account
     account_uuid= account[0][0]
+    route_name = route_body["route_name"]
     route_response= await routes_process.create_route(route_body,account_uuid,user_id)
     if not route_response:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail={"message":"Error creating route"})
 
     if route_response =="DUPLICATE":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail={"message":"Route already created"})
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail={"message":f"Route {route_name} already created"})
     return {"message":"Route created successfully"}
 
 

@@ -37,7 +37,6 @@ class MysqlOperations:
         print(f"Free: {pool.freesize} | Used: {pool.size - pool.freesize} | Max: {pool.maxsize}")
 
     async def _fetch(self, query: str, params: tuple = (), one: bool = False):
-        """SELECT genérico. Retorna tuple de filas, o una sola fila si one=True."""
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
@@ -301,15 +300,47 @@ class MysqlOperations:
             print("Error selecting points:", err)
             return ()
 
-    async def delete_point(self, point_id, user_id, account_id) -> bool:
+
+    async def get_first_route_using_point(self, point_id):
+            try:
+                return await self._fetch(
+                    """
+                    SELECT r.id, r.display_id, r.route_name, w.sequence_order
+                    FROM route_os_waypoints w
+                    JOIN routeos_os_routes r ON r.id = w.route_id
+                    WHERE w.poi_id = %s AND r.deleted_at IS NULL
+                    ORDER BY r.created_at ASC
+                    LIMIT 1
+                    """,
+                    (point_id,),
+                    one=True
+                )
+            except Exception as err:
+                print("Error checking point usage:", err)
+                return None
+
+    async def delete_point(self, point_id, user_id, account_id) -> dict:
         try:
-            return await self._execute(
-                "DELETE FROM points_of_interest WHERE display_id=%s AND user_id=%s AND account_id=%s",
+            blocking_route = await self.get_first_route_using_point(point_id)
+
+            if blocking_route:
+                return {
+                    "deleted": False,
+                    "reason": "point_in_use",
+                    "route_id": blocking_route[0],
+                    "route_display_id": blocking_route[1],
+                    "route_name": blocking_route[2]
+                }
+
+            success = await self._execute(
+                "DELETE FROM points_of_interest WHERE id=%s AND user_id=%s AND account_id=%s",
                 (point_id, user_id, account_id)
             )
+            return {"deleted": bool(success), "reason": None}
+
         except Exception as err:
             print("Error deleting point:", err)
-            return False
+            return {"deleted": False, "reason": "error"}
 
 
     async def insert_route(self, route_body: dict, account_id: str, user_id: str):
@@ -329,8 +360,8 @@ class MysqlOperations:
     async def insert_waypoints(self, waypoints: list) -> bool:
         try:
             return await self._execute_many(
-                """INSERT INTO route_os_waypoints(route_id,poi_id,sequence_order,label,dwell_time)
-                   VALUES(%s,%s,%s,%s,%s)""",
+                """INSERT INTO route_os_waypoints(route_id,poi_id,sequence_order,label)
+                   VALUES(%s,%s,%s,%s)""",
                 waypoints
             )
         except Exception as err:

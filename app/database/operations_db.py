@@ -181,20 +181,25 @@ class OperationsDB:
         points = route_body.get("points",[])
         route_response = await self.__mysqlOperations.insert_route(route_body,account_id,user_id)
         waypoints_of_the_route=[]
-        if route_response:
+        if route_response  == "DUPLICATE":
+            return "DUPLICATE"
+
+        elif route_response:
             route_id = await self.__mysqlOperations.select_route_by_display_id(route_response)
             if route_id and len(route_id)>0:
                 route_id_mysql = route_id[0][0]
                 for waypoint in points:
-                    value_mysql =(route_id_mysql,waypoint["point_id"],waypoint["id"],waypoint["point_name"],waypoint["dwell_time"])
+                    value_mysql =(route_id_mysql,waypoint["point_id"],waypoint["id"],waypoint["point_name"])
                     waypoints_of_the_route.append(value_mysql)
                 
                 waypoints_response = await self.__mysqlOperations.insert_waypoints(waypoints_of_the_route)
                 return waypoints_of_the_route
             else:
                 return False
+
         else:
             return False
+        
     
         # return True
     
