@@ -395,7 +395,7 @@ class MysqlOperations:
     async def select_drivers(self, account_id) -> tuple:
         try:
             return await self._fetch(
-                "SELECT display_id,name,sex,phone,address FROM drivers WHERE account_id=%s",
+                "SELECT id,display_id,name,sex,phone,address FROM drivers WHERE account_id=%s",
                 (account_id,)
             )
         except Exception as err:
@@ -466,3 +466,78 @@ class MysqlOperations:
             except Exception as err:
                 print("Error deleting driver:", err)
                 return False
+
+
+    async def insert_trip(self, account_id, user_id, trip_information, stops) -> dict:
+        try:
+            pool = await self._get_pool()
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await asyncio.wait_for(
+                        cur.execute(
+                            """INSERT INTO route_os_trip_assignments
+                               (account_id, route_id, created_by, driver_id, vehicle)
+                               VALUES (%s,%s,%s,%s,%s)""",
+                            (account_id, trip_information["route_id"], user_id,
+                             trip_information["driver_id"], trip_information["vehicle"])
+                        ),
+                        timeout=QUERY_TIMEOUT
+                    )
+
+                    await asyncio.wait_for(
+                        cur.execute(
+                            "SELECT id FROM route_os_trip_assignments WHERE display_id = LAST_INSERT_ID()"
+                        ),
+                        timeout=QUERY_TIMEOUT
+                    )
+                    row = await cur.fetchone()
+                    trip_id = row[0]
+
+                    stops_rows = [
+                        (trip_id, s["waypoint_id"], s["sequence_order"], s["dwell_time"], s["expected_arrival"])
+                        for s in stops
+                    ]
+                    await asyncio.wait_for(
+                        cur.executemany(
+                            """INSERT INTO route_os_trip_stops_log
+                               (trip_assignment_id, waypoint_id, sequence_order, dwell_time, expected_arrival)
+                               VALUES (%s,%s,%s,%s,%s)""",
+                            stops_rows
+                        ),
+                        timeout=QUERY_TIMEOUT
+                    )
+
+            return {"created": True, "trip_id": trip_id}
+        except IntegrityError as err:
+            return {"created": False, "reason": "DUPLICATE" if err.args[0] == 1062 else "error"}
+        except Exception as err:
+            print("Error inserting trip:", err)
+            return {"created": False, "reason": "error"}
+
+
+    async def select_trips(self, account_id) -> tuple:
+        try:
+            return await self._fetch(
+                """
+                SELECT
+                    t.id,
+                    t.display_id,
+                    t.vehicle,
+                    t.status,
+                    t.created_at,
+                    r.route_name,
+                    d.name AS driver_name,
+                    u.username AS created_by_name
+                FROM route_os_trip_assignments t
+                JOIN routeos_os_routes r ON r.id = t.route_id
+                JOIN drivers d ON d.id = t.driver_id
+                JOIN route_os_users u ON u.id = t.created_by
+                WHERE t.account_id = %s
+                  AND t.deleted_at IS NULL
+                ORDER BY t.created_at DESC
+                """,
+                (account_id,)
+            )
+        except Exception as err:
+            print("Error selecting trips:", err)
+            return ()

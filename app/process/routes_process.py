@@ -1,5 +1,6 @@
 from database.operations_db import OperationsDB
 
+
 class RoutesProcess:
     def __init__(self):
         self._dbOperations  = OperationsDB()
@@ -60,3 +61,19 @@ class RoutesProcess:
         except Exception as err:
             print("Error deleting route:",err)
             return None
+
+
+    async def create_trip(self,account_id,user_id,trip_information):
+        try:
+            trip_creation_response = await self._dbOperations.insert_trip_in_tables(account_id,user_id,trip_information)
+            return trip_creation_response
+        except Exception as err:
+            print("Error creating trip: ",err)
+
+
+    async def show_trips(self,account_id):
+        try:
+            trips = await self._dbOperations.get_trips_from_table(account_id)
+            return trips
+        except Exception as err:
+            print("Error getting the trips from table: ",err)

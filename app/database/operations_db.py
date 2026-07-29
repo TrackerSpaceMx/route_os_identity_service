@@ -1,9 +1,16 @@
 from database.mysql_operations import MysqlOperations
 import bcrypt
+from datetime import timedelta
 
 class OperationsDB:
     def __init__(self):
         self.__mysqlOperations = MysqlOperations()
+
+    @staticmethod
+    def mexico_to_utc(dt):
+        if dt is None:
+            return None
+        return dt - timedelta(hours=6)  
 
     def validate_password(self, password_input,password_hash):
         password_input_encoded = password_input.encode("utf-8")
@@ -222,7 +229,7 @@ class OperationsDB:
         drivers=[]
         if drivers_response and len(drivers_response)>0:
             for driver in drivers_response:
-                driver_structure= {"id":driver[0],"name":driver[1],"gender":driver[2],"phone":driver[3],"address":driver[4]}
+                driver_structure= {"id":driver[0],"display_id":driver[1],"name":driver[2],"gender":driver[3],"phone":driver[4],"address":driver[5]}
                 drivers.append(driver_structure)
             return drivers
         else:
@@ -264,3 +271,24 @@ class OperationsDB:
     async def remove_route_from_table(self, account_id,route_id):
             remove_route_response = await self.__mysqlOperations.delete_route(account_id,route_id)
             return remove_route_response
+
+    async def insert_trip_in_tables(self,account_id,user_id,trip_information):
+        waypoints = trip_information.get("stops")
+        for wp in waypoints:
+            wp["expected_arrival"] = OperationsDB.mexico_to_utc(wp.get("expected_arrival"))
+        trip_insertion = await self.__mysqlOperations.insert_trip(account_id,user_id,trip_information,waypoints)
+        return trip_insertion
+
+
+
+    async def get_trips_from_table(self,account_id):
+        trips_response = await self.__mysqlOperations.select_trips(account_id)
+        trips =[]
+        if trips_response:
+            for trip in trips_response:
+                print("trip: ",trip)
+                trip_structure = {"trip_id":trip[0],"display_id":trip[1],"vehicle":trip[2],"status":trip[3],"created_at":trip[4],"route":trip[5],"driver":trip[6],"created_by":trip[7]}
+                trips.append(trip_structure)
+            return trips
+        else:
+            return "NO_CONTENT"

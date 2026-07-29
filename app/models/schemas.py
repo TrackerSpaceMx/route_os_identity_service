@@ -1,5 +1,6 @@
 from pydantic import BaseModel,Field
 from typing import Optional
+from datetime import datetime
 
 
 class Users(BaseModel):
@@ -71,3 +72,16 @@ class UpdateDriver(BaseModel):
     sex : Optional[str] = None
     phone : Optional[str] = None
     address : Optional[str] = None
+
+class TripStop(BaseModel):
+    waypoint_id: str
+    sequence_order: int
+    dwell_time: Optional[int] = None
+    expected_arrival: Optional[datetime] = None
+
+class CreateTrip(BaseModel):
+    route_id: str
+    driver_id : str
+    vehicle : str
+    stops : list[TripStop]
+    

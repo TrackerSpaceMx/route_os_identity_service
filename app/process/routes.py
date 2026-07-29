@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer,HTTPAuthorizationCredentials
 from jose import JWTError,jwt
 from datetime import datetime,timedelta
-from models.schemas import Users,UserAuthentication,UpdateUser,RecoveryPassword,ResetPassword,Account,PointsOfInterest,RoutesCreation,Drivers,UpdateDriver
+from models.schemas import Users,UserAuthentication,UpdateUser,RecoveryPassword,ResetPassword,Account,PointsOfInterest,RoutesCreation,Drivers,UpdateDriver,CreateTrip
 from control.configuration import Config
 from process.user_process import UserProcess
 from process.account_process import AccountProcess
@@ -629,6 +629,49 @@ async def patch_driver(driver_id:str,body:UpdateDriver, request:Request,credenti
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail={"message":"driver already created"})
     
     return {"message":"Driver updated successfully"}
+
+
+@app.post("/trip-assigment",status_code=status.HTTP_201_CREATED)
+async def create_trip(body:CreateTrip,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+        user_id = payload.get("user_id")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    if role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                          detail={"message": "Not enough permissions"})
+    trip_body = body.model_dump()
+    account = request.state.account
+    account_uuid= account[0][0]
+    route_response= await routes_process.create_trip(account_uuid,user_id,trip_body)
+    if not route_response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail={"message":"Error creating trip"})
+
+    return {"message":"Trip created successfully"}
+
+
+@app.get("/trip-assigment",status_code=status.HTTP_200_OK)
+async def get_trips(request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    account = request.state.account
+    account_uuid = account[0][0]
+    vehicles_response = await routes_process.show_trips(account_uuid)
+
+    if vehicles_response == "NO_CONTENT":
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if not vehicles_response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"message":f"Server error"})
+    return {"data":vehicles_response}
+
 
 @app.get("/scalar",include_in_schema=False)
 def get_scalar_docs():
