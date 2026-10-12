@@ -5,6 +5,8 @@ import traceback
 from asyncmy.pool import Pool
 from asyncmy.errors import IntegrityError
 from control.configuration import Config
+import uuid
+import hashlib
 
 QUERY_TIMEOUT = 10.0  
 
@@ -134,10 +136,20 @@ class MysqlOperations:
             print("Error selecting user:", err)
             return ()
 
+    async def select_user_by_display_id(self, display_id: str, account: str,username:str) -> tuple:
+        try:
+            return await self._fetch(
+                "SELECT username,id,role FROM route_os_users WHERE display_id=%s AND account_id=%s AND username =%s",
+                (display_id, account,username)
+            )
+        except Exception as err:
+            print("Error selecting user:", err)
+            return ()
+
     async def select_user_email(self, email: str, account: str) -> tuple:
         try:
             return await self._fetch(
-                "SELECT username,password_hash,id,role FROM route_os_users WHERE email=%s AND account_id=%s",
+                "SELECT username,password_hash,id,role FROM route_os_users WHERE recovery_email=%s AND account_id=%s",
                 (email, account)
             )
         except Exception as err:
@@ -157,7 +169,7 @@ class MysqlOperations:
     async def select_users(self, account_id) -> tuple:
         try:
             return await self._fetch(
-                "SELECT username,role,created_at,email,status,phone,recovery_email FROM route_os_users WHERE account_id=%s",
+                "SELECT username,role,created_at,email,status,phone,recovery_email,last_login FROM route_os_users WHERE account_id=%s",
                 (account_id,)
             )
         except Exception as err:
@@ -184,18 +196,58 @@ class MysqlOperations:
             print("Error selecting user account with id:", err)
             return ()
 
-    async def insert_user(self, user_information: dict, account_uuid: str, password_hash: str, owner: int = 0):
+    async def insert_user(self, user_information: dict, account_uuid: str,
+                          password_hash: str, owner: int = 0):
         try:
-            return await self._execute(
-                """INSERT INTO route_os_users
-                   (account_id,name,username,email,phone,password_hash,recovery_email,role,is_owner)
-                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (account_uuid, user_information["name"], user_information["username"],
-                 user_information["email"], user_information["phone"], password_hash,
-                 user_information["recovery_email"], user_information["role"], owner)
-            )
+            user_id = str(uuid.uuid4())
+
+            clients = {}
+            for c in user_information.get("clients_information") or []:
+                clients[int(c["client_id"])] = str(c["client_name"]).strip()[:255]
+
+            pool = await self._get_pool()
+            async with pool.acquire() as conn:
+                await conn.begin()  
+                try:
+                    async with conn.cursor() as cur:
+                        await asyncio.wait_for(
+                            cur.execute(
+                                """INSERT INTO route_os_users
+                                   (id, account_id, name, username, email, phone,
+                                    password_hash, recovery_email, role, is_owner)
+                                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                                (user_id, account_uuid, user_information["name"],
+                                 user_information["username"], user_information["email"],
+                                 user_information["phone"], password_hash,
+                                 user_information["recovery_email"],
+                                 user_information["role"], owner)
+                            ),
+                            timeout=QUERY_TIMEOUT
+                        )
+                        display_id = cur.lastrowid  
+
+                        if clients:
+                            await asyncio.wait_for(
+                                cur.executemany(
+                                    """INSERT INTO clients_assigned
+                                       (user_id, account_id, client_id, client_name)
+                                       VALUES (%s,%s,%s,%s)""",
+                                    [(user_id, account_uuid, cid, name)
+                                     for cid, name in clients.items()]
+                                ),
+                                timeout=QUERY_TIMEOUT
+                            )
+                    await conn.commit()
+                except Exception:
+                    await conn.rollback()
+                    raise
+
+            return display_id
         except IntegrityError as err:
             return "DUPLICATE" if err.args[0] == 1062 else False
+        except (KeyError, ValueError, TypeError) as err:
+            print("Invalid user data:", err)
+            return False
         except Exception as err:
             print("Error inserting user:", err)
             return False
@@ -235,23 +287,53 @@ class MysqlOperations:
             traceback.print_exc()
             return False
 
-    async def insert_token(self, user_id: str, token: str) -> bool:
+    async def update_last_login(self, user_id: str, account: str) -> bool:
         try:
             return await self._execute(
-                """INSERT INTO route_os_password_resets(user_id,token,expires_at)
-                   VALUES(%s,%s,NOW() + INTERVAL 1 HOUR)""",
-                (user_id, token)
+                "UPDATE route_os_users SET last_login=CURRENT_TIMESTAMP WHERE account_id=%s AND id=%s",
+                ( account, user_id)
             )
         except Exception as err:
-            print("Error saving recovery token:", err)
+            print("Error updating last login :", err)
+            traceback.print_exc()
+            return False
+
+    async def insert_token(self, user_id: str, token: str, purpose) -> bool:
+
+        hours = {"reset": 1, "invite": 24}
+        if purpose not in hours:
+            raise ValueError(f"purpose inválido: {purpose}")
+
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+
+        try:
+            await self._execute(
+                """UPDATE route_os_password_resets
+                SET used_at = UTC_TIMESTAMP()
+                WHERE user_id = %s AND purpose = %s AND used_at IS NULL""",
+                (user_id, purpose)
+            )
+
+            return await self._execute(
+                """INSERT INTO route_os_password_resets (user_id, purpose, token, expires_at)
+                VALUES (%s, %s, %s, UTC_TIMESTAMP() + INTERVAL %s HOUR)""",
+                (user_id, purpose, token_hash, hours[purpose])
+            )
+        except Exception as err:
+            print("Error saving token:", err)
             return False
 
     async def select_token(self, token: str):
-        """Retorna una fila o None."""
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
         try:
             return await self._fetch(
-                "SELECT * FROM route_os_password_resets WHERE token=%s AND used=%s AND expires_at > NOW()",
-                (token, 0),
+                """SELECT * FROM route_os_password_resets
+                WHERE token = %s
+                    AND purpose IN ('reset', 'invite')
+                    AND used_at IS NULL
+                    AND expires_at > UTC_TIMESTAMP()
+                    AND failed_attempts < 5""",
+                (token_hash,),
                 one=True
             )
         except Exception as err:
@@ -259,10 +341,15 @@ class MysqlOperations:
             return None
 
     async def token_status(self, token: str) -> bool:
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
         try:
             return await self._execute(
-                "UPDATE route_os_password_resets SET used=%s WHERE token=%s",
-                (1, token)
+                """UPDATE route_os_password_resets
+                SET used_at = UTC_TIMESTAMP()
+                WHERE token = %s
+                    AND used_at IS NULL
+                    AND expires_at > UTC_TIMESTAMP()""",
+                (token_hash,)
             )
         except Exception as err:
             print("Error updating token status:", err)
@@ -395,12 +482,22 @@ class MysqlOperations:
     async def select_drivers(self, account_id) -> tuple:
         try:
             return await self._fetch(
-                "SELECT id,display_id,name,sex,phone,address FROM drivers WHERE account_id=%s",
+                "SELECT id,display_id,name,sex,phone,address,in_route FROM drivers WHERE account_id=%s",
                 (account_id,)
             )
         except Exception as err:
             print("Error selecting drivers:", err)
             return ()
+
+    async def select_driver_status(self, account_id,driver_id) -> tuple:
+            try:
+                return await self._fetch(
+                    "SELECT in_route FROM drivers WHERE account_id=%s and id = %s",
+                    (account_id,driver_id)
+                )
+            except Exception as err:
+                print("Error selecting drivers:", err)
+                return ()
     
 
     async def delete_driver(self, driver_id, user_id, account_id) -> bool:
@@ -412,6 +509,18 @@ class MysqlOperations:
         except Exception as err:
             print("Error deleting driver:", err)
             return False
+
+
+    async def update_driver_status(self,account: str, status:bool,driver_id) -> bool:
+            try:
+                return await self._execute(
+                    "UPDATE drivers SET in_route=%s WHERE account_id=%s AND id=%s",
+                    (status, account, driver_id)
+                )
+            except Exception as err:
+                print("Error updating driver status:", err)
+                traceback.print_exc()
+                return False
     
 
     async def update_driver(self, account: str, body: dict, driver_to_update: str):
@@ -541,3 +650,24 @@ class MysqlOperations:
         except Exception as err:
             print("Error selecting trips:", err)
             return ()
+
+
+    async def delete_trip_assignment(self, account_id, trip_id) -> str | None:
+        try:
+            row = await self._fetch(
+                "SELECT driver_id FROM route_os_trip_assignments WHERE account_id=%s AND id=%s",
+                (account_id, trip_id),
+                one=True
+            )
+            if not row:
+                return None
+
+            deleted = await self._execute(
+                "DELETE FROM route_os_trip_assignments WHERE account_id=%s AND id=%s",
+                (account_id, trip_id)
+            )
+
+            return row[0] if deleted else None
+        except Exception as err:
+            print("Error deleting trip assignment:", err)
+            return None

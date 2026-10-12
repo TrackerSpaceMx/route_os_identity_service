@@ -27,7 +27,8 @@ driver_process = DriverProcess()
 
 origins = [
     "http://localhost:5173",
-    "http://localhost:5174"
+    "http://localhost:5174",
+    "http://localhost:5175"
 ]
 
 app.add_middleware(
@@ -104,6 +105,8 @@ async def authenticate_user(body: UserAuthentication,request:Request):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail={"message":"unauthorized access"})
     
     token = create_token({"sub": user["username"],"user_id":user_validation["id"],"role":user_validation["role"]})
+    await user_process.save_last_access(user_validation["id"],account_uuid)
+
     return {"token": token}
 
 
@@ -146,7 +149,6 @@ async def recovery_password(body: RecoveryPassword, request: Request):
     token = secrets.token_urlsafe(32)
     await user_process.save_recovery_token(user["id"], token)
 
-    print("TOKEN TEST:", token)
     await user_process.send_recovery_email(body.email,token,"local")
     
     return {"message": "If the correo exists, you will receive an email"}
@@ -416,7 +418,6 @@ async def delete_point(point_id:str,request:Request,credentials: HTTPAuthorizati
     account = request.state.account
     account_uuid = account[0][0]
     delete_result= await routes_process.remove_point(point_id,user_id,account_uuid)
-    print("DELETION RESULT: ",delete_result)
     deletion_status = delete_result.get("deleted")
     if not delete_result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message":f"Point {point_id} not found"})
@@ -537,6 +538,27 @@ async def get_vehicles(request:Request,credentials: HTTPAuthorizationCredentials
     return {"data":vehicles_response}
 
 
+
+@app.get("/clients",status_code=status.HTTP_200_OK)
+async def get_clients(request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    account = request.state.account
+    account_uuid = account[0][0]
+    clients_response = await user_process.get_clients_from_fulltrack(account_uuid)
+
+    if clients_response == "NO_CONTENT":
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if not clients_response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"message":f"Server error"})
+    return {"data":clients_response}
+
+
 @app.post("/drivers",status_code=status.HTTP_201_CREATED)
 async def create_driver(body:Drivers,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
@@ -646,9 +668,13 @@ async def create_trip(body:CreateTrip,request:Request,credentials: HTTPAuthoriza
     trip_body = body.model_dump()
     account = request.state.account
     account_uuid= account[0][0]
+    print("TRIP BODY: ",trip_body)
     route_response= await routes_process.create_trip(account_uuid,user_id,trip_body)
     if not route_response:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail={"message":"Error creating trip"})
+
+    if route_response == "DRIVER_IN_ROUTE":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail={"message":"The driver is in route"})
 
     return {"message":"Trip created successfully"}
 
@@ -671,6 +697,30 @@ async def get_trips(request:Request,credentials: HTTPAuthorizationCredentials = 
     if not vehicles_response:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"message":f"Server error"})
     return {"data":vehicles_response}
+
+
+
+@app.delete("/trip-assigment/{trip_id}",status_code=status.HTTP_200_OK)
+async def delete_trip(trip_id:str,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+        user_id = payload.get("user_id")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    if role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                          detail={"message": "Not enough permissions"})
+    
+    account = request.state.account
+    account_uuid = account[0][0]
+    delete_result= await routes_process.remove_trip(account_uuid,trip_id)
+    if not delete_result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message":f"Trip {trip_id} not found"})
+
+
+    return {"message":f"Trip {trip_id} deleted successfully"}
 
 
 @app.get("/scalar",include_in_schema=False)

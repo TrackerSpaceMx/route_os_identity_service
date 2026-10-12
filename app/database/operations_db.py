@@ -89,8 +89,8 @@ class OperationsDB:
             return user_response
         return False
     
-    async def save_token_to_reset_password(self,user_id,token):
-        return await self.__mysqlOperations.insert_token(user_id,token)
+    async def save_token_to_reset_password(self,user_id,token,purpose):
+        return await self.__mysqlOperations.insert_token(user_id,token,purpose)
 
 
     async def get_token_data(self,token):
@@ -148,7 +148,7 @@ class OperationsDB:
         users =[]
         if users_response:
             for user in users_response:
-                users_information= {"username":user[0],"role":user[1],"created_at":user[2],"email":user[3],"status":user[4],"phone":user[5],"recovery_email":user[6]}
+                users_information= {"username":user[0],"role":user[1],"created_at":user[2],"email":user[3],"status":user[4],"phone":user[5],"recovery_email":user[6],"last_login_at":user[7]}
                 users.append(users_information)
             if len(users)>0:
                 return users
@@ -229,7 +229,7 @@ class OperationsDB:
         drivers=[]
         if drivers_response and len(drivers_response)>0:
             for driver in drivers_response:
-                driver_structure= {"id":driver[0],"display_id":driver[1],"name":driver[2],"gender":driver[3],"phone":driver[4],"address":driver[5]}
+                driver_structure= {"id":driver[0],"display_id":driver[1],"name":driver[2],"gender":driver[3],"phone":driver[4],"address":driver[5],"available":True if driver[6] == 0 else False}
                 drivers.append(driver_structure)
             return drivers
         else:
@@ -237,7 +237,7 @@ class OperationsDB:
     
 
     async def remove_driver_from_table(self,driver_id, user_id, account_id):
-        remove_driver_response = await self.__mysqlOperations.delete_driver(driver_id,user_id,account_id)
+        remove_driver_response = await self.__mysqlOperations.delete_driver(driver_id,user_id,account_id)        
         return remove_driver_response
     
     async def update_driver_by_id(self,account_id,driver_information,driver_id):
@@ -273,11 +273,22 @@ class OperationsDB:
             return remove_route_response
 
     async def insert_trip_in_tables(self,account_id,user_id,trip_information):
+        driver_id = trip_information.get("driver_id")
+        driver_validation = await self.__mysqlOperations.select_driver_status(account_id,driver_id)
+        driver_status = driver_validation[0][0]
+        if driver_status ==1:
+            return "DRIVER_IN_ROUTE"
         waypoints = trip_information.get("stops")
         for wp in waypoints:
             wp["expected_arrival"] = OperationsDB.mexico_to_utc(wp.get("expected_arrival"))
         trip_insertion = await self.__mysqlOperations.insert_trip(account_id,user_id,trip_information,waypoints)
-        return trip_insertion
+        created_status = trip_insertion.get("created")
+
+        if created_status:
+            driver_update_status = await self.__mysqlOperations.update_driver_status(account_id,1,driver_id)
+            return True
+        else:
+            return False
 
 
 
@@ -286,9 +297,26 @@ class OperationsDB:
         trips =[]
         if trips_response:
             for trip in trips_response:
-                print("trip: ",trip)
                 trip_structure = {"trip_id":trip[0],"display_id":trip[1],"vehicle":trip[2],"status":trip[3],"created_at":trip[4],"route":trip[5],"driver":trip[6],"created_by":trip[7]}
                 trips.append(trip_structure)
             return trips
         else:
             return "NO_CONTENT"
+
+
+    async def remove_trip_from_table(self,account_id,trip_id):
+        remove_trip_response = await self.__mysqlOperations.delete_trip_assignment(account_id,trip_id)
+        if remove_trip_response:            
+            release_driver = await self.__mysqlOperations.update_driver_status(account_id,0,remove_trip_response)
+        return remove_trip_response
+
+    async def update_last_login_in_table(self,user_id,account_id):
+        update_last_login = await self.__mysqlOperations.update_last_login(user_id,account_id)
+        return update_last_login
+
+    async def get_user_by_display_id(self,display_id,account_id,username):
+        user_id_response = await self.__mysqlOperations.select_user_by_display_id(display_id,account_id,username)
+        if user_id_response and len(user_id_response)>0:
+            user_uuid = user_id_response[0][1]
+            return user_uuid
+        return None

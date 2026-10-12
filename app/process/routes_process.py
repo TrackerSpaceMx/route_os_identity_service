@@ -66,6 +66,7 @@ class RoutesProcess:
     async def create_trip(self,account_id,user_id,trip_information):
         try:
             trip_creation_response = await self._dbOperations.insert_trip_in_tables(account_id,user_id,trip_information)
+            print("RESPONSE : ",trip_creation_response)
             return trip_creation_response
         except Exception as err:
             print("Error creating trip: ",err)
@@ -77,3 +78,10 @@ class RoutesProcess:
             return trips
         except Exception as err:
             print("Error getting the trips from table: ",err)
+
+    async def remove_trip(self,account_id,trip_id):
+        try:
+            remove_result = await self._dbOperations.remove_trip_from_table(account_id,trip_id)
+            return remove_result
+        except Exception as err:
+            print("Error removing trip: ",err)

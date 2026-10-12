@@ -3,26 +3,41 @@ import bcrypt
 import resend
 from database.operations_db import OperationsDB
 from control.configuration import Config
+import httpx
+import secrets
 
 
 class UserProcess:
     def __init__(self):
         self.__dbOPerations= OperationsDB()
+        self._clients_endpoint = "https://ws.fulltrack2.com/clients/all/apiKey/"
     
 
     @staticmethod
     def encrypt_password(password):
         password_hashed = bcrypt.hashpw(password.encode("utf-8"),bcrypt.gensalt())
         password_decoded = password_hashed.decode("utf-8")
-        return password_decoded    
+        return password_decoded 
+
+    async def save_last_access(self,user_id,account_id):
+        try:
+            update_login_response = await self.__dbOPerations.update_last_login_in_table(user_id,account_id)
+        except Exception as err:
+            print("Error updating the last status from user: ",err)   
 
     async def create_user(self,account_id,user_information,is_owner=0):
         try:
             account_id
             password_hash = UserProcess.encrypt_password(user_information["password_hash"])
+            user_insertion = await self.__dbOPerations.insert_user_in_table(account_id,user_information,password_hash,is_owner)
+            
             if "send_invitation" in user_information and user_information["send_invitation"] == True:
-                email_invitation = await self.send_welcome_email(user_information["email"],user_information["username"])
-            return await self.__dbOPerations.insert_user_in_table(account_id,user_information,password_hash,is_owner)
+                if user_insertion  and user_insertion!="DUPLICATE":
+                    print("USER INSERTION: ",user_insertion)
+                    user_id_response = await self.__dbOPerations.get_user_by_display_id(user_insertion,account_id,user_information["username"])
+                    print("UUID USER: ",user_id_response)
+                email_invitation = await self.set_password_process(user_id_response,user_information["email"],user_information["username"])
+            return user_insertion
         except Exception as err:
             print("Error creating user: ",user_information,err)
             return False
@@ -78,7 +93,7 @@ class UserProcess:
     async def send_recovery_email(self,to: str, token: str, slug: str):
         resend.api_key = Config.RESEND_API_KEY
         try:
-            reset_link = f"http://localhost:5173/reset-password?token={token}"
+            reset_link = f"http://localhost:5174/reset-password?token={token}"
             
             resend.Emails.send({
                 "from": "onboarding@resend.dev",
@@ -101,11 +116,16 @@ class UserProcess:
             print("Error sending email:", e)
             return False
 
+    async def set_password_process(self,user_id,to:str,username):
+        token = secrets.token_urlsafe(32)
+        token_insertion_response= await self.__dbOPerations.save_token_to_reset_password(user_id,token,"invite")
+        if token_insertion_response:
+            welcome_email = await self.send_welcome_email(to, username,token)
 
-    async def send_welcome_email(self, to: str, username: str):
+    async def send_welcome_email(self, to: str, username: str,token:str):
         resend.api_key = Config.RESEND_API_KEY
         try:
-            login_link = "http://localhost:5173/login"
+            reset_link = f"http://localhost:5174/reset-password?token={token}"
             
             resend.Emails.send({
                 "from": "onboarding@resend.dev",
@@ -114,9 +134,8 @@ class UserProcess:
                 "html": f"""
                     <h2>¡Bienvenido, {username}!</h2>
                     <p>Tu cuenta en el sistema Route OS ha sido creada exitosamente.</p>
-                    <p>Para obtener tus credenciales de acceso, 
-                    <strong>contacta a tu administrador</strong>.</p>
-                    <a href='{login_link}'
+                    <p>Crea tu contraseña de acceso mediante el siguiente link, este enlace expira en 1 hora, 
+                    <a href='{reset_link}'
                     style='background:#000;color:#fff;padding:12px 24px;
                             border-radius:6px;text-decoration:none'>
                     Ir al sistema
@@ -140,7 +159,7 @@ class UserProcess:
     
     async def save_recovery_token(self,user_id,token):
         try:
-            token_insertion_response= await self.__dbOPerations.save_token_to_reset_password(user_id,token)
+            token_insertion_response= await self.__dbOPerations.save_token_to_reset_password(user_id,token,"reset")
         except Exception as err:
             print("Error saving token in table:",err)
 
@@ -166,5 +185,40 @@ class UserProcess:
             users_response = await self.__dbOPerations.get_users_from_account(account_id)
             return users_response
         except Exception as err:
-            print("Error getting the users from table")
+            print("Error getting the users from table",err)
             return False
+
+
+    async def get_clients_from_fulltrack(self,account_id):
+        
+        try:
+            api_key,secret_key = await self.get_fulltrack_keys(account_id)
+            url = f"{self._clients_endpoint}{api_key}/secretKey/{secret_key}"
+            async with httpx.AsyncClient() as client:
+                clients = []
+                response = await client.get(url=url)
+                if response.status_code !=200:
+                    return False
+                response_json = response.json()
+                data = response_json.get("data")
+                if len(data) <=0:
+                    return False
+                for client in data:
+                    client_information = {"id":client["ras_cli_id"],"name":client["ras_cli_desc"]}
+                    clients.append(client_information)
+                if len(clients)>0:
+                    return clients
+                else:
+                    return "NO_CONTENT"
+
+        except Exception as err:
+            print("Error getting the clients",err)
+            return False
+
+
+    async def get_fulltrack_keys(self,account_id):
+        try:
+            api_key,secret_key= await self.__dbOPerations.get_keys_from_table(account_id)
+            return api_key,secret_key
+        except Exception as err:
+            print("Error getting the fulltrack keys: ",err)
