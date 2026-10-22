@@ -1,18 +1,21 @@
-from fastapi import FastAPI,status,HTTPException,Depends,Request,Response
+from fastapi import FastAPI, status, HTTPException, Depends, Request, Response, File, UploadFile
+from typing import Literal
 from fastapi.responses import JSONResponse
 from scalar_fastapi import get_scalar_api_reference
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer,HTTPAuthorizationCredentials
 from jose import JWTError,jwt
 from datetime import datetime,timedelta
-from models.schemas import Users,UserAuthentication,UpdateUser,RecoveryPassword,ResetPassword,Account,PointsOfInterest,RoutesCreation,Drivers,UpdateDriver,CreateTrip
+from models.schemas import Users,UserAuthentication,UpdateUser,RecoveryPassword,ResetPassword,Account,PointsOfInterest,RoutesCreation,Drivers,UpdateDriver,CreateTrip,ProtocolProfileCreate
 from control.configuration import Config
 from process.user_process import UserProcess
 from process.account_process import AccountProcess
 from process.routes_process import RoutesProcess
 from process.vehicles_process import VehichlesProcess
 from process.driver_process import DriverProcess
+from process.profiles import ProfilesProcess
 from starlette.middleware.base import BaseHTTPMiddleware
+from process.s3_process import S3Process, PhotoNotFoundError, InvalidImageError, PhotoTooLargeError
 import secrets
 
 
@@ -23,7 +26,8 @@ account_process = AccountProcess()
 routes_process = RoutesProcess()
 vehicle_process = VehichlesProcess()
 driver_process = DriverProcess()
-
+protocol_profile_process = ProfilesProcess()
+s3_process = S3Process(bucket="bucket-403790")
 
 origins = [
     "http://localhost:5173",
@@ -212,6 +216,7 @@ async def patch_user(username:str,body:UpdateUser, request:Request,credentials: 
     try:
         payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
         role = payload.get("role")
+        user_id = payload.get("user_id")
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
     if role != "admin":
@@ -224,8 +229,8 @@ async def patch_user(username:str,body:UpdateUser, request:Request,credentials: 
     if not update_data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                           detail={"message": "No fields to update"})
-
-    update_response = await user_process.update_user_by_username(account_uuid,update_data,username)
+    print("VODYYY TOI UPDATE: ",body)
+    update_response = await user_process.update_user_by_id(account_uuid,update_data,username)
     if not update_response:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message":"User not found"})
 
@@ -559,8 +564,9 @@ async def get_clients(request:Request,credentials: HTTPAuthorizationCredentials 
     return {"data":clients_response}
 
 
-@app.post("/drivers",status_code=status.HTTP_201_CREATED)
-async def create_driver(body:Drivers,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+@app.post("/drivers", status_code=status.HTTP_201_CREATED)
+async def create_driver(body: Drivers, request: Request,
+                        credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
     try:
         payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
@@ -569,16 +575,55 @@ async def create_driver(body:Drivers,request:Request,credentials: HTTPAuthorizat
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
     if role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                          detail={"message": "Not enough permissions"})
-    driver = body.model_dump()    
-    account = request.state.account
-    account_uuid= account[0][0]
-    driver_response= await driver_process.create_driver(driver,account_uuid)
-    if driver_response =="DUPLICATE":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail={"message":"Driver already created"})
-    if not driver_response:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail={"message":"Error creating driver"})
-    return {"message":"Driver created successfully"}
+                            detail={"message": "Not enough permissions"})
+
+    account_uuid = request.state.account[0][0]
+    driver = body.model_dump(exclude={"photo_id"})
+
+    photo_path = None
+    if body.photo_id:
+        try:
+            photo_path = await s3_process.finalize_photo(account_uuid, body.photo_id)
+        except PhotoNotFoundError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={"message": "Photo not found"})
+        except InvalidImageError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={"message": "Invalid image"})
+    driver["photo_url"] = photo_path
+
+    driver_response = await driver_process.create_driver(driver, account_uuid)
+
+    if driver_response == "DUPLICATE" or not driver_response:
+        if photo_path:                                   
+            await s3_process.delete_photo(photo_path)
+        if driver_response == "DUPLICATE":
+            raise HTTPException(status.HTTP_409_CONFLICT, detail={"message": "Driver already created"})
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"message": "Error creating driver"})
+
+    return {"message": "Driver created successfully"}
+
+
+@app.post("/drivers/photo", status_code=status.HTTP_200_OK)
+async def upload_photo(request: Request,
+                       file: UploadFile = File(...),
+                       credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    if role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail={"message": "Not enough permissions"})
+
+    account_uuid = request.state.account[0][0]
+    data = await file.read(S3Process.MAX_SIZE + 1)
+    try:
+        photo_id = await s3_process.store_upload(account_uuid, data)
+    except PhotoTooLargeError:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            detail={"message": "Image exceeds 5 MB"})
+    return {"photo_id": photo_id}
 
 
 @app.get("/drivers",status_code=status.HTTP_200_OK)
@@ -592,13 +637,16 @@ async def get_drivers(request:Request,credentials: HTTPAuthorizationCredentials 
 
     account = request.state.account
     account_uuid = account[0][0]
-    vehicles_response = await driver_process.show_drivers(account_uuid)
+    drivers_response = await driver_process.show_drivers(account_uuid)
 
-    if vehicles_response == "NO_CONTENT":
+    if drivers_response == "NO_CONTENT":
         return Response(status_code=status.HTTP_204_NO_CONTENT)
-    if not vehicles_response:
+    if not drivers_response:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"message":f"Server error"})
-    return {"data":vehicles_response}
+    
+    for d in drivers_response:
+        d["photo_url"] = s3_process.get_photo_url(d.get("photo_url"))
+    return {"data":drivers_response}
 
 
 @app.delete("/drivers/{driver_id}",status_code=status.HTTP_200_OK)
@@ -616,16 +664,23 @@ async def delete_driver(driver_id:str,request:Request,credentials: HTTPAuthoriza
     
     account = request.state.account
     account_uuid = account[0][0]
+    driver_key_from_S3= await driver_process.get_driver_photo_key(account_uuid,driver_id)
     delete_result= await driver_process.remove_driver(driver_id,user_id,account_uuid)
     if not delete_result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message":f"Driver {driver_id} not found"})
+
+    
+
+    if driver_key_from_S3:
+        delete_image_result = await s3_process.safe_delete(account_uuid, driver_key_from_S3) 
 
 
     return {"message":f"Driver {driver_id} deleted successfully"}
 
 
-@app.patch("/drivers/{driver_id}",status_code=status.HTTP_200_OK)
-async def patch_driver(driver_id:str,body:UpdateDriver, request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+@app.patch("/drivers/{driver_id}", status_code=status.HTTP_200_OK)
+async def patch_driver(driver_id: str, body: UpdateDriver, request: Request,
+                       credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
     try:
         payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
@@ -634,23 +689,42 @@ async def patch_driver(driver_id:str,body:UpdateDriver, request:Request,credenti
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
     if role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                          detail={"message": "Not enough permissions"})
+                            detail={"message": "Not enough permissions"})
 
-    account = request.state.account
-    account_uuid = account[0][0]
-    update_data = body.model_dump(exclude_none=True)
+    account_uuid = request.state.account[0][0]
+    update_data = body.model_dump(exclude_none=True, exclude={"photo_id", "remove_photo"})
+
+    old_key = new_key = None
+    if body.photo_id or body.remove_photo:
+        old_key = await driver_process.get_driver_photo_key(account_uuid, driver_id)
+
+    print("OLD KEY: " ,old_key)
+    if body.photo_id:
+        try:
+            new_key = await s3_process.finalize_photo(account_uuid, body.photo_id)
+        except PhotoNotFoundError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={"message": "Photo not found or expired"})
+        except InvalidImageError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={"message": "Invalid image"})
+        update_data["photo_url"] = new_key
+    elif body.remove_photo:
+        update_data["photo_url"] = None
+
     if not update_data:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                          detail={"message": "No fields to update"})
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={"message": "No fields to update"})
 
-    update_response = await driver_process.update_driver(account_uuid,update_data,driver_id)
-    if not update_response:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message":"Driver not found"})
+    update_response = await driver_process.update_driver(account_uuid, update_data, driver_id)
 
-    if update_response == "DUPLICATE":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT,detail={"message":"driver already created"})
-    
-    return {"message":"Driver updated successfully"}
+    if not update_response or update_response == "DUPLICATE":
+        await s3_process.safe_delete(account_uuid, new_key)   
+        if update_response == "DUPLICATE":
+            raise HTTPException(status.HTTP_409_CONFLICT, detail={"message": "driver already created"})
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"message": "Driver not found"})
+
+    if old_key and old_key != new_key:
+        await s3_process.safe_delete(account_uuid, old_key)   
+
+    return {"message": "Driver updated successfully"}
 
 
 @app.post("/trip-assigment",status_code=status.HTTP_201_CREATED)
@@ -721,6 +795,50 @@ async def delete_trip(trip_id:str,request:Request,credentials: HTTPAuthorization
 
 
     return {"message":f"Trip {trip_id} deleted successfully"}
+
+
+
+@app.post("/protocol-profile",status_code=status.HTTP_201_CREATED)
+async def create_protocol_profile(body:ProtocolProfileCreate,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+        user_id = payload.get("user_id")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    if role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                          detail={"message": "Not enough permissions"})
+    profile_body = body.model_dump()
+    account = request.state.account
+    account_uuid= account[0][0]
+    profile_response= await protocol_profile_process.protocol_profile_creation(account_uuid,user_id,profile_body)
+    if not profile_response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail={"message":"Error creating profile"})
+
+    return {"message":"Profile created successfully"}
+
+
+@app.get("/protocol-profile",status_code=status.HTTP_200_OK)
+async def get_trips(request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    account = request.state.account
+    account_uuid = account[0][0]
+    profile_response = await protocol_profile_process.show_protocols(account_uuid)
+
+    if profile_response == "NO_CONTENT":
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if not profile_response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"message":f"Server error"})
+    return {"data":profile_response}
+
 
 
 @app.get("/scalar",include_in_schema=False)

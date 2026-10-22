@@ -36,3 +36,11 @@ class DriverProcess:
             return update_driver_response
         except Exception as err:
             print("Error updating driver: ",err)
+
+    async def get_driver_photo_key(self,account_id, driver_id):
+        try:
+            driver_phot_url = await self._dbOperations.get_s3_url_from_driver(account_id,driver_id)
+            return driver_phot_url
+        except Exception as err:
+            print("Error founding driver url: ",err)
+            return False

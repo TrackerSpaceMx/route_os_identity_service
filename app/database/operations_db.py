@@ -1,6 +1,8 @@
 from database.mysql_operations import MysqlOperations
 import bcrypt
 from datetime import timedelta
+import json
+import uuid
 
 class OperationsDB:
     def __init__(self):
@@ -148,7 +150,14 @@ class OperationsDB:
         users =[]
         if users_response:
             for user in users_response:
-                users_information= {"username":user[0],"role":user[1],"created_at":user[2],"email":user[3],"status":user[4],"phone":user[5],"recovery_email":user[6],"last_login_at":user[7]}
+                is_owner = user[8]
+                print
+                users_information= {"username":user[0],"role":user[1],"created_at":user[2],"email":user[3],"status":user[4],"phone":user[5],"recovery_email":user[6],"last_login_at":user[7],"name":user[9],"user_id":user[10]}
+                if is_owner == 1:
+                    users_information.update({"clientes_information":"all"})
+                else:
+                    clients_information = json.loads(user[11])
+                    users_information.update({"clientes_information":clients_information})
                 users.append(users_information)
             if len(users)>0:
                 return users
@@ -208,7 +217,7 @@ class OperationsDB:
             return False
         
     
-        # return True
+
     
     async def get_keys_from_table(self,account_id):
         keys_response = await self.__mysqlOperations.select_keys(account_id)
@@ -226,10 +235,11 @@ class OperationsDB:
 
     async def get_drivers_from_table(self,account_id):
         drivers_response = await self.__mysqlOperations.select_drivers(account_id)
+        print("select drivers: ",drivers_response)
         drivers=[]
         if drivers_response and len(drivers_response)>0:
             for driver in drivers_response:
-                driver_structure= {"id":driver[0],"display_id":driver[1],"name":driver[2],"gender":driver[3],"phone":driver[4],"address":driver[5],"available":True if driver[6] == 0 else False}
+                driver_structure= {"id":driver[0],"display_id":driver[1],"name":driver[2],"employee_number":driver[3],"phone":driver[4],"phone_secondary":driver[5],"photo_url":driver[6],"license_number" : driver[7], "license_expiry": driver[8],"available": True if driver[9] == 0 else False,"notes":driver[10]}
                 drivers.append(driver_structure)
             return drivers
         else:
@@ -320,3 +330,52 @@ class OperationsDB:
             user_uuid = user_id_response[0][1]
             return user_uuid
         return None
+
+    async def get_s3_url_from_driver(self,account_id,driver_id):
+        url_response = await self.__mysqlOperations.select_driver_photo_key(account_id,driver_id)
+        if not url_response:
+            return False
+        
+        url_s3 = url_response[0][0]
+
+        return url_s3
+
+
+    async def create_protocol_profile(self, account_id, user_id, data: dict, rule_defs: dict, locked_rules: set):
+        profile_id = str(uuid.uuid4())
+        rule_rows, action_rows = [], []
+
+        for r in data["rules"]:
+            rule_id = str(uuid.uuid4())
+            rule_rows.append((
+                rule_id, profile_id, r["rule_type"],
+                rule_defs[r["rule_type"]]["category"],
+                int(r["is_enabled"]),
+                int(r["rule_type"] in locked_rules),
+                r["severity"], r["risk_impact"],
+                r.get("threshold_value"), r.get("threshold_unit"),
+                json.dumps(r["params"]) if r.get("params") else None,
+            ))
+            for i, a in enumerate(r.get("actions", [])):
+                action_rows.append((
+                    str(uuid.uuid4()), rule_id, a["action_type"],
+                    a["delay_minutes"], int(a["escalate"]), i,
+                    json.dumps(a["config"]) if a.get("config") else None,
+                ))
+
+        return await self.__mysqlOperations.create_protocol_profile_mysql(
+            profile_id, account_id, user_id, data, rule_rows, action_rows
+        )
+
+    async def get_protocol_profiles_from_table(self, account_id):
+        response = await self.__mysqlOperations.select_protocol_profiles(account_id)
+        profiles = []
+        if response:
+            for p in response:
+                profiles.append({
+                    "id": p[0], "display_id": p[1], "name": p[2],
+                    "description": p[3], "is_default": bool(p[4]),
+                    "created_at": p[5], "created_by": p[6], "active_rules": p[7],
+                })
+            return profiles
+        return "NO_CONTENT"

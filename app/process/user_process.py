@@ -33,9 +33,7 @@ class UserProcess:
             
             if "send_invitation" in user_information and user_information["send_invitation"] == True:
                 if user_insertion  and user_insertion!="DUPLICATE":
-                    print("USER INSERTION: ",user_insertion)
                     user_id_response = await self.__dbOPerations.get_user_by_display_id(user_insertion,account_id,user_information["username"])
-                    print("UUID USER: ",user_id_response)
                 email_invitation = await self.set_password_process(user_id_response,user_information["email"],user_information["username"])
             return user_insertion
         except Exception as err:
@@ -63,9 +61,9 @@ class UserProcess:
             print("Error getting the slug:",err)
             return None
     
-    async def update_user_by_username(self,account: str, body:dict,user_to_update:str):
+    async def update_user_by_id(self,account: str, body:dict,user_to_update:str):
         try:
-            valid_keys_to_update = ("name","username","email","phone","password_hash","recovery_email","status")
+            valid_keys_to_update = ("name","username","email","phone","password_hash","recovery_email","status","clients_information")
             keys_to_update = [key for key in body.keys()]
             for key in keys_to_update:
                 if key not in valid_keys_to_update:
@@ -75,7 +73,7 @@ class UserProcess:
                 body["password_hash"] = UserProcess.encrypt_password(body.get("password_hash"))
             update_result = await self.__dbOPerations.update_user(account,body,user_to_update)
             if update_result:
-                return update_result            
+                return update_result       
         except Exception as err:
             print("Error updating the user: ",err)
             return False

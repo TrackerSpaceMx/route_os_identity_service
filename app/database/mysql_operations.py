@@ -7,11 +7,13 @@ from asyncmy.errors import IntegrityError
 from control.configuration import Config
 import uuid
 import hashlib
+from contextlib import asynccontextmanager
 
 QUERY_TIMEOUT = 10.0  
 
 
 class MysqlOperations:
+    
     _pool: Pool = None
     _lock = asyncio.Lock()
 
@@ -33,6 +35,18 @@ class MysqlOperations:
                         connect_timeout=10, 
                     )
         return cls._pool
+
+    @asynccontextmanager
+    async def transaction(self):
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.begin()
+            try:
+                yield conn
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                raise
 
     async def pool_status(self):
         pool = await self._get_pool()
@@ -169,7 +183,32 @@ class MysqlOperations:
     async def select_users(self, account_id) -> tuple:
         try:
             return await self._fetch(
-                "SELECT username,role,created_at,email,status,phone,recovery_email,last_login FROM route_os_users WHERE account_id=%s",
+                """
+                SELECT 
+                    u.username,
+                    u.role,
+                    u.created_at,
+                    u.email,
+                    u.status,
+                    u.phone,
+                    u.recovery_email,
+                    u.last_login,
+                    u.is_owner,
+                    u.name,
+                    u.id,
+                    JSON_ARRAYAGG(
+                        JSON_OBJECT(
+                            'client_id', ca.client_id,
+                            'client_name', ca.client_name
+                        )
+                    ) AS clients
+                FROM route_os_users u
+                LEFT JOIN clients_assigned ca 
+                    ON ca.user_id = u.id 
+                    AND ca.account_id = u.account_id
+                WHERE u.account_id = %s
+                GROUP BY u.id
+                """,
                 (account_id,)
             )
         except Exception as err:
@@ -254,12 +293,38 @@ class MysqlOperations:
 
     async def update_user(self, account: str, body: dict, user_to_update: str):
         try:
-            fields = [f"{key} = %s" for key in body]
-            values = (*body.values(), account, user_to_update)
-            return await self._execute(
-                f"UPDATE route_os_users SET {', '.join(fields)} WHERE account_id=%s AND username=%s",
-                values
+            clients = body.pop("clients_information", None)
+
+            row = await self._fetch(
+                "SELECT id FROM route_os_users WHERE account_id=%s AND id=%s",
+                (account, user_to_update),
+                one=True
             )
+            if not row:
+                return False
+            user_id = row[0]
+
+            if body:
+                fields = [f"{key} = %s" for key in body]
+                values = (*body.values(), account, user_to_update)
+                await self._execute(
+                    f"UPDATE route_os_users SET {', '.join(fields)} WHERE account_id=%s AND id=%s",
+                    values
+                )
+
+            if clients is not None:
+                await self._execute(
+                    "DELETE FROM clients_assigned WHERE user_id=%s AND account_id=%s",
+                    (user_id, account)
+                )
+                if clients:
+                    await self._execute_many(
+                        "INSERT INTO clients_assigned (user_id, account_id, client_id, client_name) VALUES (%s, %s, %s, %s)",
+                        [(user_id, account, c["client_id"], c["client_name"]) for c in clients]
+                    )
+
+            return True
+
         except IntegrityError as err:
             return "DUPLICATE" if err.args[0] == 1062 else False
         except Exception as err:
@@ -469,9 +534,9 @@ class MysqlOperations:
     async def insert_driver(self, driver: dict, account_id: str):
         try:
             return await self._execute(
-                """INSERT INTO drivers(account_id,name,sex,phone,address)
-                   VALUES(%s,%s,%s,%s,%s)""",
-                (account_id, driver["name"], driver["sex"], driver["phone"], driver["address"])
+                """INSERT INTO drivers(account_id,name,employee_number,phone,phone_secondary,photo_url,license_number,license_expiry,in_route)
+                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (account_id, driver["name"], driver["employee_number"], driver["phone"], driver["phone_secondary"],driver["photo_url"],driver["license_number"],driver["license_expiry"],0)
             )
         except IntegrityError as err:
             return "DUPLICATE" if err.args[0] == 1062 else False
@@ -482,7 +547,7 @@ class MysqlOperations:
     async def select_drivers(self, account_id) -> tuple:
         try:
             return await self._fetch(
-                "SELECT id,display_id,name,sex,phone,address,in_route FROM drivers WHERE account_id=%s",
+                "SELECT id,display_id,name,employee_number,phone,phone_secondary,photo_url,license_number,license_expiry,in_route,notes FROM drivers WHERE account_id=%s",
                 (account_id,)
             )
         except Exception as err:
@@ -503,7 +568,7 @@ class MysqlOperations:
     async def delete_driver(self, driver_id, user_id, account_id) -> bool:
         try:
             return await self._execute(
-                "DELETE FROM drivers WHERE display_id=%s  AND account_id=%s",
+                "DELETE FROM drivers WHERE id=%s  AND account_id=%s",
                 (driver_id, account_id)
             )
         except Exception as err:
@@ -524,17 +589,23 @@ class MysqlOperations:
     
 
     async def update_driver(self, account: str, body: dict, driver_to_update: str):
+        ALLOWED = {"name", "employee_number", "phone", "phone_secondary", "license_number", "license_expiry","photo_url","notes"}
         try:
-            fields = [f"{key} = %s" for key in body]
-            values = (*body.values(), account, driver_to_update)
+            data = {k: v for k, v in body.items() if k in ALLOWED}
+            if not data:
+                return False
+
+            fields = [f"{k} = %s" for k in data]
+            values = (*data.values(), account, driver_to_update)
+
             return await self._execute(
-                f"UPDATE drivers SET {', '.join(fields)} WHERE account_id=%s AND display_id=%s",
+                f"UPDATE drivers SET {', '.join(fields)} WHERE account_id=%s AND id=%s",
                 values
             )
         except IntegrityError as err:
             return "DUPLICATE" if err.args[0] == 1062 else False
         except Exception as err:
-            print("Error updating user:", err)
+            print("Error updating driver:", err)
             return False
 
 
@@ -671,3 +742,102 @@ class MysqlOperations:
         except Exception as err:
             print("Error deleting trip assignment:", err)
             return None
+
+    async def select_driver_photo_key(self, account: str, driver_id: str):
+        try:
+            result = await self._fetch(
+                "SELECT photo_url FROM drivers WHERE account_id=%s AND id=%s",
+                (account, driver_id)
+            )
+            return result
+        except Exception as err:
+            print("Error getting driver photo:", err)
+            return False
+
+
+    async def create_protocol_profile_mysql(self, profile_id, account_id, user_id, data, rule_rows, action_rows):
+        try:
+            async with self.transaction() as conn:
+                await self.insert_protocol_profile(conn, profile_id, account_id, user_id, data)
+                await self.insert_protocol_rules(conn, rule_rows)
+                await self.insert_protocol_rule_actions(conn, action_rows)
+            return profile_id
+        except IntegrityError as err:
+            return "DUPLICATE" if err.args[0] == 1062 else False
+        except Exception as err:
+            print("Error creating protocol profile:", err)
+            return False
+
+    async def insert_protocol_profile(self, conn, profile_id, account_id, user_id, data: dict):
+        async with conn.cursor() as cur:
+            if data["is_default"]:
+                await asyncio.wait_for(
+                    cur.execute(
+                        "UPDATE protocol_profiles SET is_default=0 WHERE account_id=%s",
+                        (account_id,)
+                    ),
+                    timeout=QUERY_TIMEOUT
+                )
+            await asyncio.wait_for(
+                cur.execute(
+                    """INSERT INTO protocol_profiles
+                    (id, account_id, created_by, name, description, is_default)
+                    VALUES (%s,%s,%s,%s,%s,%s)""",
+                    (profile_id, account_id, user_id,
+                    data["name"], data.get("description"), int(data["is_default"]))
+                ),
+                timeout=QUERY_TIMEOUT
+            )
+
+    async def insert_protocol_rules(self, conn, rule_rows: list):
+        async with conn.cursor() as cur:
+            await asyncio.wait_for(
+                cur.executemany(
+                    """INSERT INTO protocol_rules
+                    (id, profile_id, rule_type, category, is_enabled, is_locked,
+                        severity, risk_impact, threshold_value, threshold_unit, params)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    rule_rows
+                ),
+                timeout=QUERY_TIMEOUT
+            )
+
+    async def insert_protocol_rule_actions(self, conn, action_rows: list):
+        if not action_rows:
+            return
+        async with conn.cursor() as cur:
+            await asyncio.wait_for(
+                cur.executemany(
+                    """INSERT INTO protocol_rule_actions
+                    (id, rule_id, action_type, delay_minutes, escalate, sort_order, config)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                    action_rows
+                ),
+                timeout=QUERY_TIMEOUT
+            )
+
+
+    async def select_protocol_profiles(self, account_id) -> tuple:
+        try:
+            return await self._fetch(
+                """
+                SELECT
+                    p.id,
+                    p.display_id,
+                    p.name,
+                    p.description,
+                    p.is_default,
+                    p.created_at,
+                    u.username AS created_by_name,
+                    (SELECT COUNT(*) FROM protocol_rules r
+                    WHERE r.profile_id = p.id AND r.is_enabled = 1) AS active_rules
+                FROM protocol_profiles p
+                JOIN route_os_users u ON u.id = p.created_by
+                WHERE p.account_id = %s
+                ORDER BY p.is_default DESC, p.created_at DESC
+                """,
+                (account_id,)
+            )
+        except Exception as err:
+            print("Error selecting protocol profiles:", err)
+            return ()

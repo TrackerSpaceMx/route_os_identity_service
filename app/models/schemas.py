@@ -1,7 +1,8 @@
-from pydantic import BaseModel,Field
+from pydantic import BaseModel,Field,model_validator
 from typing import Optional
+from enum import Enum
 from datetime import datetime
-
+from uuid import UUID
 
 class Users(BaseModel):
     name: str = Field(max_length=100)
@@ -27,6 +28,7 @@ class UpdateUser(BaseModel):
     password_hash : Optional[str] = None
     recovery_email : Optional[str] = None
     status : Optional[int] = None
+    clients_information: Optional[list[dict]] = None
 
 
 class RecoveryPassword(BaseModel):
@@ -62,17 +64,24 @@ class RoutesCreation(BaseModel):
 
 class Drivers(BaseModel):
     name:str
-    sex:str
+    employee_number: str
     phone:str
-    address:str
-
-
+    phone_secondary:str
+    license_number: str
+    license_expiry: datetime
+    photo_id: UUID | None = None
+    notes: str | None = Field(default=None, max_length=500)
 
 class UpdateDriver(BaseModel):
-    name : Optional[str] = None
-    sex : Optional[str] = None
-    phone : Optional[str] = None
-    address : Optional[str] = None
+    name: Optional[str] = None
+    employee_number: Optional[str] = None
+    phone: Optional[str] = None
+    phone_secondary: Optional[str] = None
+    license_number: Optional[str] = None
+    license_expiry: Optional[str] = None
+    notes: Optional[str] = None
+    photo_id: Optional[UUID] = None
+    remove_photo: bool = False
 
 class TripStop(BaseModel):
     waypoint_id: str
@@ -85,4 +94,71 @@ class CreateTrip(BaseModel):
     driver_id : str
     vehicle : str
     stops : list[TripStop]
-    
+
+
+class Severity(str, Enum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+    critical = "critical"
+
+
+class ThresholdUnit(str, Enum):
+    seconds = "seconds"
+    minutes = "minutes"
+    km = "km"
+    hour = "hour"
+    count = "count"
+
+
+class RuleType(str, Enum):
+    panic = "panic"
+    battery_disconnected = "battery_disconnected"
+    jammer_detected = "jammer_detected"
+    risk_zone = "risk_zone"
+    signal_loss = "signal_loss"
+    route_deviation = "route_deviation"
+    restricted_stop = "restricted_stop"
+    authorized_stop = "authorized_stop"
+    restricted_hours = "restricted_hours"
+    unload_dwell = "unload_dwell"
+    rest_dwell = "rest_dwell"
+    suspicious_call = "suspicious_call"
+
+
+class ActionType(str, Enum):
+    call_operator = "call_operator"
+    send_email = "send_email"
+    engine_stop = "engine_stop"
+
+
+class RuleAction(BaseModel):
+    action_type: ActionType
+    delay_minutes: int = Field(0, ge=0)
+    escalate: bool = False
+    config: Optional[dict] = None
+
+
+class ProtocolRule(BaseModel):
+    rule_type: RuleType
+    is_enabled: bool = True
+    severity: Severity
+    risk_impact: int = Field(..., ge=0, le=100)
+    threshold_value: Optional[int] = Field(None, ge=0)
+    threshold_unit: Optional[ThresholdUnit] = None
+    params: Optional[dict] = None
+    actions: list[RuleAction] = []
+
+
+class ProtocolProfileCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = Field(None, max_length=500)
+    is_default: bool = False
+    rules: list[ProtocolRule] = []
+
+    @model_validator(mode="after")
+    def no_duplicate_rule_types(self):
+        types = [r.rule_type for r in self.rules]
+        if len(types) != len(set(types)):
+            raise ValueError("rule_type repeated in rules")
+        return self
