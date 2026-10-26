@@ -5,6 +5,7 @@ from database.operations_db import OperationsDB
 from control.configuration import Config
 import httpx
 import secrets
+import json
 
 
 class UserProcess:
@@ -204,6 +205,46 @@ class UserProcess:
                 for client in data:
                     client_information = {"id":client["ras_cli_id"],"name":client["ras_cli_desc"]}
                     clients.append(client_information)
+                if len(clients)>0:
+                    return clients
+                else:
+                    return "NO_CONTENT"
+
+        except Exception as err:
+            print("Error getting the clients",err)
+            return False
+
+    
+
+    async def get_clients_assigned_from_fulltrack(self,account_id,user_id):
+        try:
+            api_key,secret_key = await self.get_fulltrack_keys(account_id)
+            current_clients = await self.__dbOPerations.select_clients_assinged_from_table(account_id,user_id)
+            if not current_clients:
+                return False
+            clients_information = current_clients[0]
+            is_owner = clients_information[1]
+            clients_assinged = json.loads(clients_information[2])
+            clients_assinged_list = [client.get("client_id") for client in clients_assinged]
+            url = f"{self._clients_endpoint}{api_key}/secretKey/{secret_key}"
+            async with httpx.AsyncClient() as client:
+                clients = []
+                response = await client.get(url=url)
+                if response.status_code !=200:
+                    return False
+                response_json = response.json()
+                data = response_json.get("data")
+                if len(data) <=0:
+                    return False
+                for client in data:
+                    if is_owner == 1:
+                        client_information = {"id":client["ras_cli_id"],"name":client["ras_cli_desc"]}
+                        clients.append(client_information)
+                    else:
+                        client_id = int(client["ras_cli_id"])
+                        if client_id in clients_assinged_list:
+                            client_information = {"id":client["ras_cli_id"],"name":client["ras_cli_desc"]}
+                            clients.append(client_information)
                 if len(clients)>0:
                     return clients
                 else:

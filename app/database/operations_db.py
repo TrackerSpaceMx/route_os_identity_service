@@ -235,7 +235,6 @@ class OperationsDB:
 
     async def get_drivers_from_table(self,account_id):
         drivers_response = await self.__mysqlOperations.select_drivers(account_id)
-        print("select drivers: ",drivers_response)
         drivers=[]
         if drivers_response and len(drivers_response)>0:
             for driver in drivers_response:
@@ -379,3 +378,11 @@ class OperationsDB:
                 })
             return profiles
         return "NO_CONTENT"
+
+    async def remove_protocol_profile(self,account_id,protocol_id):
+        delete_profile_result = await self.__mysqlOperations.delete_profile_protocol(account_id,protocol_id)
+        return delete_profile_result
+
+    async def select_clients_assinged_from_table(self,account_id,user_id):
+        current_clients_response =  await self.__mysqlOperations.select_clients_assinged(account_id,user_id)
+        return current_clients_response

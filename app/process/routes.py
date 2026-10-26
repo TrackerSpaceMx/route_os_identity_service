@@ -229,7 +229,6 @@ async def patch_user(username:str,body:UpdateUser, request:Request,credentials: 
     if not update_data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                           detail={"message": "No fields to update"})
-    print("VODYYY TOI UPDATE: ",body)
     update_response = await user_process.update_user_by_id(account_uuid,update_data,username)
     if not update_response:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message":"User not found"})
@@ -564,6 +563,27 @@ async def get_clients(request:Request,credentials: HTTPAuthorizationCredentials 
     return {"data":clients_response}
 
 
+@app.get("/clients-assinged",status_code=status.HTTP_200_OK)
+async def get_clients_assigned(request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+        user_id = payload.get("user_id")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    account = request.state.account
+    account_uuid = account[0][0]
+    clients_response = await user_process.get_clients_assigned_from_fulltrack(account_uuid,user_id)
+
+    if clients_response == "NO_CONTENT":
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if not clients_response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"message":f"Server error"})
+    return {"data":clients_response}
+
+
 @app.post("/drivers", status_code=status.HTTP_201_CREATED)
 async def create_driver(body: Drivers, request: Request,
                         credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -742,7 +762,6 @@ async def create_trip(body:CreateTrip,request:Request,credentials: HTTPAuthoriza
     trip_body = body.model_dump()
     account = request.state.account
     account_uuid= account[0][0]
-    print("TRIP BODY: ",trip_body)
     route_response= await routes_process.create_trip(account_uuid,user_id,trip_body)
     if not route_response:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail={"message":"Error creating trip"})
@@ -839,6 +858,28 @@ async def get_trips(request:Request,credentials: HTTPAuthorizationCredentials = 
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"message":f"Server error"})
     return {"data":profile_response}
 
+
+@app.delete("/protocol-profile/{protocol_id}",status_code=status.HTTP_200_OK)
+async def delete_protocol_profile(protocol_id:str,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+        user_id = payload.get("user_id")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    if role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                          detail={"message": "Not enough permissions"})
+    
+    account = request.state.account
+    account_uuid = account[0][0]
+    delete_result= await protocol_profile_process.delete_protocol_profile_from_table(account_uuid,protocol_id)
+    if not delete_result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message":f"Protocol {protocol_id} not found"})
+
+
+    return {"message":f"Protocol {protocol_id} deleted successfully"}
 
 
 @app.get("/scalar",include_in_schema=False)

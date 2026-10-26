@@ -39,3 +39,12 @@ class ProfilesProcess:
         except Exception as err:
             print("Error getting the protocols: ",err)
             return None
+
+    async def delete_protocol_profile_from_table(self,account_id,protocol_id):
+        try:
+            delete_result = await self._dbOperations.remove_protocol_profile(account_id,protocol_id)
+            return delete_result
+
+        except Exception as err:
+            print("Error deleting protocol profile: ",err)
+            return None

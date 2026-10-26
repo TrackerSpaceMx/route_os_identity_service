@@ -173,7 +173,7 @@ class MysqlOperations:
     async def select_owner_status(self, user: str, account: str) -> tuple:
         try:
             return await self._fetch(
-                "SELECT is_owner FROM route_os_users WHERE username=%s AND account_id=%s",
+                "SELECT is_owner FROM route_os_users WHERE id=%s AND account_id=%s",
                 (user, account)
             )
         except Exception as err:
@@ -334,7 +334,7 @@ class MysqlOperations:
     async def delete_user(self, account: str, username: str) -> bool:
         try:
             return await self._execute(
-                "DELETE FROM route_os_users WHERE account_id=%s AND username=%s AND is_owner=0",
+                "DELETE FROM route_os_users WHERE account_id=%s AND id=%s AND is_owner=0",
                 (account, username)
             )
         except Exception as err:
@@ -474,6 +474,9 @@ class MysqlOperations:
     async def delete_point(self, point_id, user_id, account_id) -> dict:
         try:
             blocking_route = await self.get_first_route_using_point(point_id)
+            print("ACCOUNT ID: ",account_id)
+            print("USER ID: ",user_id)
+            print("BLOCKING RESPONSE: ",blocking_route)
 
             if blocking_route:
                 return {
@@ -483,10 +486,10 @@ class MysqlOperations:
                     "route_display_id": blocking_route[1],
                     "route_name": blocking_route[2]
                 }
-
+            print("HERE IN DELTE")
             success = await self._execute(
-                "DELETE FROM points_of_interest WHERE id=%s AND user_id=%s AND account_id=%s",
-                (point_id, user_id, account_id)
+                "DELETE FROM points_of_interest WHERE id=%s  AND account_id=%s",
+                (point_id, account_id)
             )
             return {"deleted": bool(success), "reason": None}
 
@@ -498,10 +501,10 @@ class MysqlOperations:
     async def insert_route(self, route_body: dict, account_id: str, user_id: str):
         try:
             return await self._execute(
-                """INSERT INTO routeos_os_routes(account_id,created_by,route_name,active_days)
-                   VALUES(%s,%s,%s,%s)""",
+                """INSERT INTO routeos_os_routes(account_id,created_by,route_name,folio,client_name,client_id,starting_location,scheduled_departure)
+                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (account_id,
-                 user_id, route_body["route_name"], json.dumps(route_body["active_days"]))
+                 user_id, route_body["route_name"], route_body["folio"],route_body["client_name"],route_body["client_id"],route_body["starting_location"],route_body["scheduled_departure"])
             )
         except IntegrityError as err:
             return "DUPLICATE" if err.args[0] == 1062 else False
@@ -840,4 +843,39 @@ class MysqlOperations:
             )
         except Exception as err:
             print("Error selecting protocol profiles:", err)
+            return ()
+
+    async def delete_profile_protocol(self,account_id ,profile_id: str) -> bool:
+        try:
+            return await self._execute(
+                "DELETE FROM protocol_profiles WHERE account_id = %s AND id = %s", (account_id,profile_id)
+            )
+        except Exception as err:
+            print("Error deleting account:", err)
+            return False
+
+    async def select_clients_assinged(self, account_id,user_id) -> tuple:
+        try:
+            return await self._fetch(
+                """
+                SELECT 
+                    u.username,
+                    u.is_owner,
+                    JSON_ARRAYAGG(
+                        JSON_OBJECT(
+                            'client_id', ca.client_id,
+                            'client_name', ca.client_name
+                        )
+                    ) AS clients
+                FROM route_os_users u
+                LEFT JOIN clients_assigned ca 
+                    ON ca.user_id = u.id 
+                    AND ca.account_id = u.account_id
+                WHERE u.account_id = %s AND u.id = %s
+                GROUP BY u.id
+                """,
+                (account_id,user_id)
+            )
+        except Exception as err:
+            print("Error selecting users:", err)
             return ()

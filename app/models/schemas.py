@@ -58,8 +58,13 @@ class PointsOfInterest(BaseModel):
 
 class RoutesCreation(BaseModel):
     route_name : str
-    active_days : list[str]
     points : list[dict]
+    client_id : int
+    client_name : str
+    folio : str
+    starting_location: str
+    scheduled_departure: datetime
+
 
 
 class Drivers(BaseModel):
