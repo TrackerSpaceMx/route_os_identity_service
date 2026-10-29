@@ -41,12 +41,10 @@ class VehichlesProcess:
                         data = response.json()
                         data_content = data.get("data",None)
                         for vehicle in data_content:
-                            driver= vehicle.get("ras_mot_nome",None)
                             plate = vehicle.get("ras_vei_placa")
+                            vehicle_name = vehicle.get("ras_vei_veiculo")
                             if plate and plate!="":
-                                if driver == "PADRAO":
-                                    driver = "Sin conductor asignado"
-                                vehicle_information = {"plate":plate,"driver":driver}
+                                vehicle_information = {"plate":plate,"vehicle_name":vehicle_name}
                                 vehicles.append(vehicle_information)
                         if len(vehicle)>0:
                             return vehicles

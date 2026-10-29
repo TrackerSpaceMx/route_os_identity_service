@@ -501,10 +501,10 @@ class MysqlOperations:
     async def insert_route(self, route_body: dict, account_id: str, user_id: str):
         try:
             return await self._execute(
-                """INSERT INTO routeos_os_routes(account_id,created_by,route_name,folio,client_name,client_id,starting_location,scheduled_departure)
-                   VALUES(%s,%s,%s,%s,%s,%s,%s,%s)""",
+                """INSERT INTO routeos_os_routes(account_id,created_by,route_name,client_name,client_id,starting_location,scheduled_departure)
+                   VALUES(%s,%s,%s,%s,%s,%s,%s)""",
                 (account_id,
-                 user_id, route_body["route_name"], route_body["folio"],route_body["client_name"],route_body["client_id"],route_body["starting_location"],route_body["scheduled_departure"])
+                 user_id, route_body["route_name"],route_body["client_name"],route_body["client_id"],route_body["starting_location"],route_body["scheduled_departure"])
             )
         except IntegrityError as err:
             return "DUPLICATE" if err.args[0] == 1062 else False
@@ -659,10 +659,10 @@ class MysqlOperations:
                     await asyncio.wait_for(
                         cur.execute(
                             """INSERT INTO route_os_trip_assignments
-                               (account_id, route_id, created_by, driver_id, vehicle)
-                               VALUES (%s,%s,%s,%s,%s)""",
+                               (account_id, route_id, created_by, driver_id, driver_phone,vehicle_name,vehicle_plate,protocol_profile_id,folio)
+                               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                             (account_id, trip_information["route_id"], user_id,
-                             trip_information["driver_id"], trip_information["vehicle"])
+                             trip_information["driver_id"], trip_information["driver_phone"],trip_information["vehicle_name"],trip_information["vehicle_plate"],trip_information["protocol_profile_id"],trip_information["folio"])
                         ),
                         timeout=QUERY_TIMEOUT
                     )
@@ -705,7 +705,7 @@ class MysqlOperations:
                 SELECT
                     t.id,
                     t.display_id,
-                    t.vehicle,
+                    t.vehicle_name,
                     t.status,
                     t.created_at,
                     r.route_name,
@@ -879,3 +879,208 @@ class MysqlOperations:
         except Exception as err:
             print("Error selecting users:", err)
             return ()
+
+    
+    async def select_active_trips(
+        self,
+        account_id: str,
+        *,
+        f_client: str | None = None,
+        f_plate: str | None = None,
+        f_driver: str | None = None,
+        f_status: str | None = None,
+        f_date: str | None = None,   
+        f_q: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple:
+        try:
+            where_clauses = []
+            filter_params: list = []
+
+            if f_client is not None:
+                where_clauses.append("v.client_id = %s")
+                filter_params.append(f_client)
+            if f_plate is not None:
+                where_clauses.append("v.vehicle_plate = %s")
+                filter_params.append(f_plate)
+            if f_driver is not None:
+                where_clauses.append("v.driver_id = %s")
+                filter_params.append(f_driver)
+            if f_status is not None:
+                where_clauses.append("v.display_status = %s")
+                filter_params.append(f_status)
+            if f_date is not None:
+                where_clauses.append("DATE(v.scheduled_departure) = %s")
+                filter_params.append(f_date)
+            if f_q is not None:
+                like = f"%{f_q}%"
+                where_clauses.append(
+                    "(v.folio LIKE %s OR v.vehicle_plate LIKE %s "
+                    "OR v.driver_name LIKE %s OR v.employee_number LIKE %s)"
+                )
+                filter_params.extend([like, like, like, like])
+
+            outer_where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+            query = f"""
+                SELECT *
+                FROM (
+                    SELECT
+                        t.id,
+                        t.display_id,
+                        t.account_id,
+                        t.folio,
+                        t.status                                                         AS trip_status,
+                        t.vehicle_name,
+                        t.vehicle_plate,
+
+                        r.route_name,
+                        r.client_id,
+                        r.client_name,
+
+                        d.id                                                             AS driver_id,
+                        d.name                                                           AS driver_name,
+                        d.employee_number,
+                        d.photo_url,
+
+                        t.protocol_profile_id,
+                        pp.name                                                          AS protocol_name,
+
+                        COALESCE(s.scheduled_at, r.scheduled_departure)                 AS scheduled_departure,
+                        s.real_departure,
+                        s.eta_planned,
+                        COALESCE(ls.eta_estimated, s.eta_planned)                       AS eta,
+                        TIMESTAMPDIFF(
+                            MINUTE,
+                            COALESCE(s.scheduled_at, r.scheduled_departure),
+                            s.real_departure
+                        )                                                                AS departure_delay_min,
+                        COALESCE(s.delayed_stops, 0)                                    AS delayed_stops,
+                        COALESCE(s.done_stops,    0)                                    AS done_stops,
+                        COALESCE(s.total_stops,   0)                                    AS total_stops,
+
+                        ls.phase,
+                        ls.last_latitude,
+                        ls.last_longitude,
+                        ls.last_speed_kmh,
+                        ls.last_position_at,
+
+                        COALESCE(ev.risk_score, 0)                                      AS risk_score,
+                        COALESCE(ev.open_events, 0)                                     AS open_events,
+
+                        CASE
+                            WHEN t.status = 'scheduled'            THEN 'pending'
+                            WHEN COALESCE(ev.risk_score, 0) >= 50  THEN 'at_risk'
+                            ELSE COALESCE(ls.phase, 'in_progress')
+                        END                                                              AS display_status,
+
+                        (COALESCE(s.delayed_stops, 0) = 0)                              AS on_schedule
+
+                    FROM route_os_trip_assignments t
+                    JOIN routeos_os_routes   r  ON r.id  = t.route_id
+                    JOIN drivers             d  ON d.id  = t.driver_id
+                    JOIN protocol_profiles   pp ON pp.id = t.protocol_profile_id
+                    LEFT JOIN trip_live_state ls ON ls.trip_assignment_id = t.id
+
+                    LEFT JOIN (
+                        SELECT e.trip_assignment_id,
+                            LEAST(100, SUM(e.risk_impact)) AS risk_score,
+                            COUNT(*)                        AS open_events
+                        FROM trip_protocol_events e
+                        JOIN route_os_trip_assignments a
+                        ON a.id         = e.trip_assignment_id
+                        AND a.account_id = %s
+                        AND a.deleted_at IS NULL
+                        AND a.status IN ('scheduled', 'in_progress')
+                        WHERE e.resolved_at IS NULL
+                        GROUP BY e.trip_assignment_id
+                    ) ev ON ev.trip_assignment_id = t.id
+
+                    LEFT JOIN (
+                        SELECT l.trip_assignment_id,
+                            MAX(CASE WHEN l.sequence_order = 1 THEN l.expected_arrival END) AS scheduled_at,
+                            MAX(CASE WHEN l.sequence_order = 1 THEN l.actual_departure  END) AS real_departure,
+                            MAX(l.expected_arrival)            AS eta_planned,
+                            SUM(l.status = 'delayed')          AS delayed_stops,
+                            SUM(l.actual_arrival IS NOT NULL)  AS done_stops,
+                            COUNT(*)                           AS total_stops
+                        FROM route_os_trip_stops_log l
+                        WHERE l.trip_assignment_id IN (
+                            SELECT a.id
+                            FROM route_os_trip_assignments a
+                            WHERE a.account_id = %s
+                            AND a.deleted_at IS NULL
+                            AND a.status IN ('scheduled', 'in_progress')
+                        )
+                        GROUP BY l.trip_assignment_id
+                    ) s ON s.trip_assignment_id = t.id
+
+                    WHERE t.account_id = %s
+                    AND t.deleted_at IS NULL
+                    AND t.status IN ('scheduled', 'in_progress')
+                ) v
+                {outer_where}
+                ORDER BY v.risk_score DESC, v.scheduled_departure ASC
+                LIMIT %s OFFSET %s
+            """
+            params = (account_id, account_id, account_id, *filter_params, limit, offset)
+
+            return await self._fetch(query, params)
+
+        except Exception as err:
+            print("Error selecting active trips:", err)
+            return ()
+
+
+    async def select_active_trips_summary(self, account_id: str) -> tuple:
+        try:
+            return await self._fetch(
+                """
+                SELECT
+                    COUNT(*)                               AS active_trips,
+                    COALESCE(SUM(x.ds = 'at_risk'),  0)   AS in_risk,
+                    COALESCE(SUM(x.ds = 'logistic'), 0)   AS logistic,
+                    COALESCE(SUM(x.ds = 'pending'),  0)   AS slopes
+                FROM (
+                    SELECT CASE
+                            WHEN t.status = 'scheduled'            THEN 'pending'
+                            WHEN COALESCE(ev.risk_score, 0) >= 50  THEN 'at_risk'
+                            ELSE COALESCE(ls.phase, 'in_progress')
+                        END AS ds
+                    FROM route_os_trip_assignments t
+                    LEFT JOIN trip_live_state ls ON ls.trip_assignment_id = t.id
+                    LEFT JOIN (
+                        SELECT e.trip_assignment_id,
+                            LEAST(100, SUM(e.risk_impact)) AS risk_score
+                        FROM trip_protocol_events e
+                        JOIN route_os_trip_assignments a
+                        ON a.id         = e.trip_assignment_id
+                        AND a.account_id = %s
+                        AND a.deleted_at IS NULL
+                        AND a.status IN ('scheduled', 'in_progress')
+                        WHERE e.resolved_at IS NULL
+                        GROUP BY e.trip_assignment_id
+                    ) ev ON ev.trip_assignment_id = t.id
+                    WHERE t.account_id = %s
+                    AND t.deleted_at IS NULL
+                    AND t.status IN ('scheduled', 'in_progress')
+                ) x
+                """,
+                (account_id, account_id),
+                one=True
+            )
+        except Exception as err:
+            print("Error selecting active trips summary:", err)
+            return ()
+
+    async def update_trip_status(self, account_id: str, trip_id: str, status: str) -> bool:
+        try:
+            return await self._execute(
+                "UPDATE route_os_trip_assignments SET status=%s WHERE account_id=%s AND id=%s",
+                (status,account_id, trip_id)
+            )
+        except Exception as err:
+            print("Error updating password:", err)
+            traceback.print_exc()
+            return False

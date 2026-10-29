@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer,HTTPAuthorizationCredentials
 from jose import JWTError,jwt
 from datetime import datetime,timedelta
-from models.schemas import Users,UserAuthentication,UpdateUser,RecoveryPassword,ResetPassword,Account,PointsOfInterest,RoutesCreation,Drivers,UpdateDriver,CreateTrip,ProtocolProfileCreate
+from models.schemas import Users,UserAuthentication,UpdateUser,RecoveryPassword,ResetPassword,Account,PointsOfInterest,RoutesCreation,Drivers,UpdateDriver,CreateTrip,ProtocolProfileCreate,StartTrip
 from control.configuration import Config
 from process.user_process import UserProcess
 from process.account_process import AccountProcess
@@ -14,6 +14,7 @@ from process.routes_process import RoutesProcess
 from process.vehicles_process import VehichlesProcess
 from process.driver_process import DriverProcess
 from process.profiles import ProfilesProcess
+from process.monitoring_process import MonitoringProcess
 from starlette.middleware.base import BaseHTTPMiddleware
 from process.s3_process import S3Process, PhotoNotFoundError, InvalidImageError, PhotoTooLargeError
 import secrets
@@ -27,6 +28,7 @@ routes_process = RoutesProcess()
 vehicle_process = VehichlesProcess()
 driver_process = DriverProcess()
 protocol_profile_process = ProfilesProcess()
+monitoring_process = MonitoringProcess()
 s3_process = S3Process(bucket="bucket-403790")
 
 origins = [
@@ -880,6 +882,49 @@ async def delete_protocol_profile(protocol_id:str,request:Request,credentials: H
 
 
     return {"message":f"Protocol {protocol_id} deleted successfully"}
+
+
+@app.get("/monitoring",status_code=status.HTTP_200_OK)
+async def get_monitoring_information(request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    account = request.state.account
+    account_uuid = account[0][0]
+    monitoring_response = await monitoring_process.get_monitoring_information(account_uuid)
+
+    if monitoring_response == "NO_CONTENT":
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if not monitoring_response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"message":f"Server error"})
+    return {"data":monitoring_response}
+
+
+@app.patch("/trip-assigment/{trip_id}/status",status_code=status.HTTP_200_OK)
+async def start_trip(trip_id:str,body: StartTrip ,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+        user_id = payload.get("user_id")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    if role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                          detail={"message": "Not enough permissions"})
+
+    account = request.state.account
+    account_uuid = account[0][0]
+    trip_status = body.trip_status
+    update_response = await monitoring_process.modify_trip_status(account_uuid,trip_id,trip_status)
+    if not update_response:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message":"Trip not found"})
+    return {"message":"Trip updated successfully"}
+
 
 
 @app.get("/scalar",include_in_schema=False)

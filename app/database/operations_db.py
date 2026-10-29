@@ -386,3 +386,59 @@ class OperationsDB:
     async def select_clients_assinged_from_table(self,account_id,user_id):
         current_clients_response =  await self.__mysqlOperations.select_clients_assinged(account_id,user_id)
         return current_clients_response
+
+
+    async def get_monitoring_information_from_table(self,account_id):
+        monitoring_payload = []
+        
+        monitoring_response = await self.__mysqlOperations.select_active_trips(account_id)
+
+        if not monitoring_response:
+            return "NO_CONTENT"
+
+        counter_response = await self.__mysqlOperations.select_active_trips_summary(account_id)
+        if not counter_response:
+            return "NO_CONTENT"
+        for trip in monitoring_response:
+            payload_response = {}
+            payload_response["id"] = trip[0]
+            payload_response["display_id"] = trip[1]
+            payload_response["account_id"] = trip[2]
+            payload_response["folio"] = trip[3]
+            payload_response["trip_status"] = trip[4]
+            payload_response["vehicle_name"] = trip[5]
+            payload_response["vehicle_plate"] = trip[6]
+            payload_response["route_name"] = trip[7]
+            payload_response["client_id"] = trip[8]
+            payload_response["client_name"] = trip[9]
+            payload_response["driver_id"] = trip[10]
+            payload_response["driver_name"] = trip[11]
+            payload_response["employee_number"] = trip[12]
+            payload_response["photo_url"] = trip[13]
+            payload_response["protocol_profile_id"] = trip[14]
+            payload_response["protocol_name"] = trip[15]
+            payload_response["scheduled_departure"] = trip[16]
+            payload_response["real_departure"] = trip[17]
+            payload_response["eta_planned"] = trip[18]
+            payload_response["eta"] = trip[19]
+            payload_response["departure_delay_min"] = trip[20]
+            payload_response["delay_stops"] = trip[21]
+            payload_response["done_stops"] = trip[22]
+            payload_response["total_stops"] = trip[23]
+            payload_response["phase"] = trip[24]
+            payload_response["last_latitude"] = trip[25]
+            payload_response["last_longitude"] = trip[26]
+            payload_response["last_speed_kmh"] = trip[27]
+            payload_response["last_position_at"] = trip[28]
+            payload_response["risk_score"] = trip[29]
+            payload_response["open_events"] = trip[30]
+            payload_response["display_status"] = trip[31]
+            payload_response["on_schedule"] = trip[32]
+            payload_response["active_trips_sumary"] ={"active_trips":counter_response[0],"in_risk":counter_response[1],"logistic":counter_response[2],"slopes":counter_response[3]}
+            
+            monitoring_payload.append(payload_response)
+        return monitoring_payload if len(monitoring_payload) > 0 else []
+
+    async def alter_trip_status_in_table(self,account_id,trip_id,status):
+        trip_status_response = await self.__mysqlOperations.update_trip_status(account_id,trip_id,status)
+        return trip_status_response

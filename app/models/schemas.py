@@ -1,5 +1,5 @@
 from pydantic import BaseModel,Field,model_validator
-from typing import Optional
+from typing import Optional,Literal
 from enum import Enum
 from datetime import datetime
 from uuid import UUID
@@ -61,7 +61,6 @@ class RoutesCreation(BaseModel):
     points : list[dict]
     client_id : int
     client_name : str
-    folio : str
     starting_location: str
     scheduled_departure: datetime
 
@@ -97,7 +96,11 @@ class TripStop(BaseModel):
 class CreateTrip(BaseModel):
     route_id: str
     driver_id : str
-    vehicle : str
+    vehicle_name : str
+    vehicle_plate : str
+    protocol_profile_id : str
+    driver_phone : str
+    folio : str
     stops : list[TripStop]
 
 
@@ -167,3 +170,6 @@ class ProtocolProfileCreate(BaseModel):
         if len(types) != len(set(types)):
             raise ValueError("rule_type repeated in rules")
         return self
+
+class StartTrip(BaseModel):
+    trip_status : Literal["in_progress", "completed", "cancelled"]
