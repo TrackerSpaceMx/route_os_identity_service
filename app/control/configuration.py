@@ -13,5 +13,9 @@ class Configuration:
     SECRET_KEY= str(os.getenv("SECRET_KEY"))
     TOKEN_EXPIRE_MINUTES = int(os.getenv("TOKEN_EXPIRE_MINUTES"))
     RESEND_API_KEY = str(os.getenv("RESEND_API_KEY"))
+    RABBIT_HOST = str(os.getenv("RABBIT_HOST"))
+    RABBIT_PORT = int(os.getenv("RABBIT_PORT"))
+    RABBIT_USER = str(os.getenv("RABBIT_USER"))
+    RABBIT_PASSWORD = str(os.getenv("RABBIT_PASSWORD"))
 
 Config = Configuration()

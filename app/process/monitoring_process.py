@@ -16,11 +16,8 @@ class MonitoringProcess:
 
     async def modify_trip_status(self,account_id, trip_id,status):
         try:
-            print("TRIP TO UPDATE: ",trip_id)
-            print("status: ",status)
             update_result = await self._dbOperations.alter_trip_status_in_table(account_id,trip_id,status)
             return update_result
-
         except Exception as err:
             print("Error starting the trip: ",err)
             return None

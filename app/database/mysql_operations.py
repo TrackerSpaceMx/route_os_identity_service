@@ -1084,3 +1084,22 @@ class MysqlOperations:
             print("Error updating password:", err)
             traceback.print_exc()
             return False
+
+    async def select_vehicle_information_for_trip(self,account_id:str,trip_id:str) -> tuple:
+        try:
+            return await self._fetch(
+                """SELECT
+                    route_trip.vehicle_name,
+                    route_trip.vehicle_plate,
+                    route_os.id,
+                    route_os.client_name,
+                    route_os.client_id
+                FROM route_os_trip_assignments AS route_trip
+                LEFT JOIN routeos_os_routes AS route_os
+                    ON route_trip.route_id = route_os.id 
+                    WHERE  route_trip.account_id = %s and route_trip.id = %s
+                    """ ,(account_id,trip_id)
+            )
+        except Exception as err:
+            print("Error selecting accounts:", err)
+            return ()

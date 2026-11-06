@@ -1,4 +1,5 @@
 from database.mysql_operations import MysqlOperations
+from database.rabbit_operations import RabbitOperations
 import bcrypt
 from datetime import timedelta
 import json
@@ -7,6 +8,7 @@ import uuid
 class OperationsDB:
     def __init__(self):
         self.__mysqlOperations = MysqlOperations()
+        self._rabbitOperations = RabbitOperations()
 
     @staticmethod
     def mexico_to_utc(dt):
@@ -441,4 +443,12 @@ class OperationsDB:
 
     async def alter_trip_status_in_table(self,account_id,trip_id,status):
         trip_status_response = await self.__mysqlOperations.update_trip_status(account_id,trip_id,status)
+        if trip_status_response  and status == "in_progress":
+            get_vehicle_in_trip = await self.__mysqlOperations.select_vehicle_information_for_trip(account_id,trip_id)
+            if get_vehicle_in_trip:
+                vehicle_information = get_vehicle_in_trip[0]
+                print("vehicle response: ",get_vehicle_in_trip)
+                event_message = {"type":"new_trip","account_id":account_id,"trip_id":trip_id,"vehicle_name":vehicle_information[0],"vehicle_plate":vehicle_information[1],"route_id":vehicle_information[2],"client_name":vehicle_information[3],"client":vehicle_information[4]}
+                event_message_parsed = json.dumps(event_message)
+                sending_message = await self._rabbitOperations.publish_event_in_queue(event_message_parsed,"ts.route_os_events")
         return trip_status_response
