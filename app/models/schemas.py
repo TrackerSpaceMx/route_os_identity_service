@@ -62,7 +62,6 @@ class RoutesCreation(BaseModel):
     client_id : int
     client_name : str
     starting_location: str
-    scheduled_departure: datetime
 
 
 
@@ -102,6 +101,7 @@ class CreateTrip(BaseModel):
     driver_phone : str
     folio : str
     stops : list[TripStop]
+    scheduled_departure : datetime
 
 
 class Severity(str, Enum):

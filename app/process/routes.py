@@ -671,6 +671,28 @@ async def get_drivers(request:Request,credentials: HTTPAuthorizationCredentials 
     return {"data":drivers_response}
 
 
+@app.get("/drivers/{driver_id}/trips",status_code=status.HTTP_200_OK)
+async def get_drivers_trips(driver_id:str,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    account = request.state.account
+    account_uuid = account[0][0]
+    driver_trip_response = await driver_process.get_drivers_trips_information(driver_id,account_uuid)
+
+    if driver_trip_response == "NO_CONTENT":
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if not driver_trip_response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"message":f"Server error"})
+
+
+    return {"data":driver_trip_response}
+
+
 @app.delete("/drivers/{driver_id}",status_code=status.HTTP_200_OK)
 async def delete_driver(driver_id:str,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
@@ -896,6 +918,27 @@ async def get_monitoring_information(request:Request,credentials: HTTPAuthorizat
     account = request.state.account
     account_uuid = account[0][0]
     monitoring_response = await monitoring_process.get_monitoring_information(account_uuid)
+
+    if monitoring_response == "NO_CONTENT":
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if not monitoring_response:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail={"message":f"Server error"})
+    return {"data":monitoring_response}
+
+
+
+@app.get("/monitoring/{trip_id}/stops",status_code=status.HTTP_200_OK)
+async def get_monitoring_information(trip_id:str,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
+        role = payload.get("role")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    account = request.state.account
+    account_uuid = account[0][0]
+    monitoring_response = await monitoring_process.get_stops_information(trip_id)
 
     if monitoring_response == "NO_CONTENT":
         return Response(status_code=status.HTTP_204_NO_CONTENT)

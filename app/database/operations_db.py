@@ -397,7 +397,6 @@ class OperationsDB:
 
         if not monitoring_response:
             return "NO_CONTENT"
-
         counter_response = await self.__mysqlOperations.select_active_trips_summary(account_id)
         if not counter_response:
             return "NO_CONTENT"
@@ -435,8 +434,10 @@ class OperationsDB:
             payload_response["risk_score"] = trip[29]
             payload_response["open_events"] = trip[30]
             payload_response["display_status"] = trip[31]
-            payload_response["on_schedule"] = trip[32]
+            payload_response["hide_in_min"] = trip[32]
+            payload_response["on_schedule"] = trip[33]
             payload_response["active_trips_sumary"] ={"active_trips":counter_response[0],"in_risk":counter_response[1],"logistic":counter_response[2],"slopes":counter_response[3]}
+
             
             monitoring_payload.append(payload_response)
         return monitoring_payload if len(monitoring_payload) > 0 else []
@@ -447,8 +448,46 @@ class OperationsDB:
             get_vehicle_in_trip = await self.__mysqlOperations.select_vehicle_information_for_trip(account_id,trip_id)
             if get_vehicle_in_trip:
                 vehicle_information = get_vehicle_in_trip[0]
-                print("vehicle response: ",get_vehicle_in_trip)
                 event_message = {"type":"new_trip","account_id":account_id,"trip_id":trip_id,"vehicle_name":vehicle_information[0],"vehicle_plate":vehicle_information[1],"route_id":vehicle_information[2],"client_name":vehicle_information[3],"client":vehicle_information[4]}
                 event_message_parsed = json.dumps(event_message)
                 sending_message = await self._rabbitOperations.publish_event_in_queue(event_message_parsed,"ts.route_os_events")
         return trip_status_response
+
+    async def get_stops_information_from_table(self,trip_id:str):
+        stops_information = await self.__mysqlOperations.select_stops_information(trip_id)
+        stops_response =[]
+
+        if not stops_information:
+            return "NO_CONTENT"
+
+        for stop in stops_information:
+            stop_body = {
+                "stop_sequence": stop[0],
+                "name": stop[1],
+                "lat": stop[2],
+                "lng": stop[3],
+                "scheduled_arrival": stop[4],
+                "status": stop[5]
+                }
+            stops_response.append(stop_body)
+        
+        return stops_response
+
+
+    async def get_driver_trips_from_table(self,driver_id,account_id):
+        driver_trips = await self.__mysqlOperations.select_driver_trips(driver_id,account_id)
+        driver_trips_response = []
+        if not driver_trips:
+            return "NO_CONTENT"
+
+        for trip in driver_trips:
+            trip_payload = {
+                "folio":trip[0],
+                "vehicle_name":trip[1],
+                "vechile_plate":trip[2],
+                "scheduled_departure":trip[3],
+                "expected_arrival":trip[4],
+                "status":trip[5]
+            }
+            driver_trips_response.append(trip_payload)
+        return driver_trips_response

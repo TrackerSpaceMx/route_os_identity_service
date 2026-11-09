@@ -44,3 +44,11 @@ class DriverProcess:
         except Exception as err:
             print("Error founding driver url: ",err)
             return False
+
+    async def get_drivers_trips_information(self,driver_id,account_id):
+        try:
+            driver_trips = await self._dbOperations.get_driver_trips_from_table(driver_id,account_id)
+            return driver_trips
+        except Exception as err:
+            print("Error searching the trips for driver: ",err)
+            return False

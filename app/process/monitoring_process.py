@@ -21,4 +21,12 @@ class MonitoringProcess:
         except Exception as err:
             print("Error starting the trip: ",err)
             return None
+
+    async def get_stops_information(self,trip_id):
+        try:
+            stops_query_result =  await self._dbOperations.get_stops_information_from_table(trip_id)
+            return stops_query_result
+        except Exception as err:
+            print("Error getting the stops information :",trip_id)
+            return None
         
