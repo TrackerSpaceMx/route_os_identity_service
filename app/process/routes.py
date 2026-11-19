@@ -524,8 +524,8 @@ async def delete_route(route_id:str,request:Request,credentials: HTTPAuthorizati
     return {"message":f"Route {route_id} deleted successfully"}
 
 
-@app.get("/vehicles",status_code=status.HTTP_200_OK)
-async def get_vehicles(request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
+@app.get("/vehicles/{route_id}",status_code=status.HTTP_200_OK)
+async def get_vehicles(route_id:str,request:Request,credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
     try:
         payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
@@ -535,7 +535,7 @@ async def get_vehicles(request:Request,credentials: HTTPAuthorizationCredentials
 
     account = request.state.account
     account_uuid = account[0][0]
-    vehicles_response = await vehicle_process.show_vehicles(account_uuid)
+    vehicles_response = await vehicle_process.show_vehicles(account_uuid,route_id)
 
     if vehicles_response == "NO_CONTENT":
         return Response(status_code=status.HTTP_204_NO_CONTENT)

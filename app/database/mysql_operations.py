@@ -1162,7 +1162,8 @@ class MysqlOperations:
                     route_trip.vehicle_plate,
                     route_os.id,
                     route_os.client_name,
-                    route_os.client_id
+                    route_os.client_id,
+                    route_trip.driver_id
                 FROM route_os_trip_assignments AS route_trip
                 LEFT JOIN routeos_os_routes AS route_os
                     ON route_trip.route_id = route_os.id 
@@ -1211,4 +1212,14 @@ class MysqlOperations:
             )
         except Exception as err:
             print("Error selecting driver trips:", err)
+            return ()
+
+    async def select_enterprise_id_by_route(self, account_id,route_id) -> tuple:
+        try:
+            return await self._fetch(
+                "SELECT id,client_name,client_id FROM routeos_os_routes WHERE account_id=%s and id = %s",
+                (account_id,route_id)
+            )
+        except Exception as err:
+            print("Error selecting enterprise id for route:", err)
             return ()

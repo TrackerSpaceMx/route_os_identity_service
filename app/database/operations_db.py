@@ -448,7 +448,7 @@ class OperationsDB:
             get_vehicle_in_trip = await self.__mysqlOperations.select_vehicle_information_for_trip(account_id,trip_id)
             if get_vehicle_in_trip:
                 vehicle_information = get_vehicle_in_trip[0]
-                event_message = {"type":"new_trip","account_id":account_id,"trip_id":trip_id,"vehicle_name":vehicle_information[0],"vehicle_plate":vehicle_information[1],"route_id":vehicle_information[2],"client_name":vehicle_information[3],"client":vehicle_information[4]}
+                event_message = {"type":"new_trip","account_id":account_id,"trip_id":trip_id,"vehicle_name":vehicle_information[0],"vehicle_plate":vehicle_information[1],"route_id":vehicle_information[2],"client_name":vehicle_information[3],"client":vehicle_information[4],"driver_id":vehicle_information[5]}
                 event_message_parsed = json.dumps(event_message)
                 sending_message = await self._rabbitOperations.publish_event_in_queue(event_message_parsed,"ts.route_os_events")
         return trip_status_response
@@ -491,3 +491,10 @@ class OperationsDB:
             }
             driver_trips_response.append(trip_payload)
         return driver_trips_response
+
+    async def get_id_enterprise_for_route(self,account_id,route_id):
+        route_response = await self.__mysqlOperations.select_enterprise_id_by_route(account_id,route_id)
+        if route_response:
+            enterprise_id = route_response[0][2]
+            return enterprise_id
+        return None

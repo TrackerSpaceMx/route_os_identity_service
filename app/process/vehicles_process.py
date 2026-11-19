@@ -28,8 +28,11 @@ class VehichlesProcess:
             print("Error validating fulltrack keys: ",err)
             return False
 
-    async def show_vehicles(self,account_id):
+    async def show_vehicles(self,account_id,route_id):
         try:
+            enterprise_id_selected = await self.__dbOPerations.get_id_enterprise_for_route(account_id,route_id)
+            if  not enterprise_id_selected:
+                return None
             api_key,secret_key = await self.get_fulltrack_keys(account_id)
             if api_key and secret_key:
                 url = f"{self._events_all}{api_key}/secretKey/{secret_key}"
@@ -43,7 +46,8 @@ class VehichlesProcess:
                         for vehicle in data_content:
                             plate = vehicle.get("ras_vei_placa")
                             vehicle_name = vehicle.get("ras_vei_veiculo")
-                            if plate and plate!="":
+                            client_id = vehicle.get("ras_cli_id",None)
+                            if plate and plate!="" and client_id == str(enterprise_id_selected):
                                 vehicle_information = {"plate":plate,"vehicle_name":vehicle_name}
                                 vehicles.append(vehicle_information)
                         if len(vehicle)>0:
